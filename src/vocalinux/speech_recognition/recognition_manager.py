@@ -20,6 +20,7 @@ from ..ui.audio_feedback import play_error_sound, play_start_sound, play_stop_so
 from ..utils.vosk_model_info import VOSK_MODEL_INFO
 from ..utils.whispercpp_model_info import WHISPERCPP_MODEL_INFO, get_model_path, is_model_downloaded
 from .command_processor import CommandProcessor
+from .text_post_processor import TextPostProcessor
 
 
 # ALSA error handler to suppress warnings during PyAudio initialization
@@ -533,6 +534,7 @@ class SpeechRecognitionManager:
         self.model = None
         self.recognizer = None  # Added for VOSK
         self.command_processor = CommandProcessor()
+        self.text_post_processor = TextPostProcessor()
 
         # Voice commands: None=auto (VOSK=yes, Whisper=no), True=always on, False=always off
         self._voice_commands_preference = kwargs.get("voice_commands_enabled")
@@ -1907,12 +1909,13 @@ class SpeechRecognitionManager:
             f"DEBUG: _process_audio_buffer got text='{text[:50] if text else '(empty)'}...'"
         )
         if text:
+            # Always run text post-processing
+            processed_text = self.text_post_processor.process(text)
+
+            # Optionally run command processing
             if self._voice_commands_enabled:
-                # Process with voice commands (original behavior)
-                processed_text, actions = self.command_processor.process_text(text)
+                processed_text, actions = self.command_processor.process_text(processed_text)
             else:
-                # Voice commands disabled - pass text through directly (Whisper handles punctuation)
-                processed_text = text.strip()
                 actions = []
 
             # Call text callbacks with processed text
