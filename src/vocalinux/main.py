@@ -406,18 +406,20 @@ def main():
             Args:
                 text: Raw transcription segment from the speech engine.
             """
-            text_to_inject = text.strip()
-            if not text_to_inject:
+            # text_to_inject = text.strip()
+            if not text.strip():
                 return
 
+            ## Now Handled in TextPostProcessor.
             # Add a separating space between consecutive dictation segments,
             # but never for the very first segment (avoids unwanted leading space
             # when starting dictation in an empty text field).
-            if action_handler.last_injected_text and action_handler.last_injected_text.strip():
-                text_to_inject = " " + text_to_inject
-                logger.debug("Added space separator before new segment")
-
-            success = text_system.inject_text(text_to_inject)
+            # if action_handler.last_injected_text and action_handler.last_injected_text.strip():
+            #     text_to_inject = " " + text_to_inject
+            #     logger.debug("Added space separator before new segment")
+            ##
+            
+            success = text_system.inject_text(text)
             if success:
                 action_handler.set_last_injected_text(text)
 
