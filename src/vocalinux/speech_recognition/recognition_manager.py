@@ -21,6 +21,8 @@ from ..utils.vosk_model_info import VOSK_MODEL_INFO
 from ..utils.whispercpp_model_info import WHISPERCPP_MODEL_INFO, get_model_path, is_model_downloaded
 from .command_processor import CommandProcessor
 from .text_post_processor import TextPostProcessor
+from .mode_controller import ModeController
+
 
 
 # ALSA error handler to suppress warnings during PyAudio initialization
@@ -535,6 +537,7 @@ class SpeechRecognitionManager:
         self.recognizer = None  # Added for VOSK
         self.command_processor = CommandProcessor()
         self.text_post_processor = TextPostProcessor()
+        self.mode_controller = ModeController()
 
         # Voice commands: None=auto (VOSK=yes, Whisper=no), True=always on, False=always off
         self._voice_commands_preference = kwargs.get("voice_commands_enabled")
@@ -1908,31 +1911,39 @@ class SpeechRecognitionManager:
         logger.info(
             f"DEBUG: _process_audio_buffer got text='{text[:50] if text else '(empty)'}...'"
         )
-        if text:
-            # Always run text post-processing
-            processed_text = self.text_post_processor.process(text)
 
-            # Optionally run command processing
+        if text:
+            mode, consumed = self.mode_controller.handle(text)
+            if consumed:
+                logger.info(f"[MODE] → {mode}")
+                return
+
+            processed_text = self.text_post_processor.process(
+                text,
+                mode=self.mode_controller.mode
+            )
+
+            # Optional command processing
             if self._voice_commands_enabled:
                 processed_text, actions = self.command_processor.process_text(processed_text)
             else:
                 actions = []
 
-            # Call text callbacks with processed text
-            logger.info(
-                f"DEBUG: processed_text='{processed_text[:50] if processed_text else '(empty)'}...', callbacks={len(self.text_callbacks)}"
-            )
-            if processed_text:
-                for callback in self.text_callbacks:
-                    logger.info(
-                        f"DEBUG: invoking text callback: {callback.__name__ if hasattr(callback, '__name__') else callback}"
-                    )
-                    callback(processed_text)
+        # Call text callbacks with processed text
+        logger.info(
+            f"DEBUG: processed_text='{processed_text[:50] if processed_text else '(empty)'}...', callbacks={len(self.text_callbacks)}"
+        )
+        if processed_text:
+            for callback in self.text_callbacks:
+                logger.info(
+                    f"DEBUG: invoking text callback: {callback.__name__ if hasattr(callback, '__name__') else callback}"
+                )
+                callback(processed_text)
 
-            # Call action callbacks for each action
-            for action in actions:
-                for callback in self.action_callbacks:
-                    callback(action)
+        # Call action callbacks for each action
+        for action in actions:
+            for callback in self.action_callbacks:
+                callback(action)
 
     def _perform_recognition(self):
         """Perform speech recognition in real-time."""

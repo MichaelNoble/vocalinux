@@ -16,18 +16,43 @@ class TextPostProcessor:
     def __init__(self):
         self.last_text = ""  # for future context-aware improvements
 
-    def process(self, text: str) -> str:
-        logger.info(f"Initial: {text}")
+    def process(self, text: str, mode: str = "clean") -> str:
+        logger.info(f"Initial: {text} | mode={mode}")
+
         if not text:
             return ""
 
         original = text
-        text = text.strip()
 
+        # RAW mode = minimal interference
+        if mode == "raw":
+            text = text.strip()
+            text = self._merge_with_previous(text)
+            self.last_text = text
+            return text
+
+        # --- shared baseline ---
+        text = text.strip()
         text = self._normalize_whitespace(text)
-        text = self._cleanup_punctuation(text)
-        text = self._fix_spacing(text)
-        text = self._capitalize_sentences(text)
+
+        # CLEAN / STRICT / CODING share some behavior
+        if mode in ("clean", "strict", "coding", "terminal"):
+            text = self._cleanup_punctuation(text)
+            text = self._fix_spacing(text)
+
+        # STRICT = more aggressive corrections
+        # if mode == "strict":
+        #     text = self._aggressive_cleanup(text)  # (you can add later)
+        #
+        # # CODING = avoid messing with symbols too much
+        # if mode == "coding":
+        #     text = self._light_spacing(text)  # optional future tweak
+
+        # TERMINAL = minimal formatting, no capitalization
+        if mode != "terminal":
+            text = self._capitalize_sentences(text)
+
+        # Merge chunks LAST
         text = self._merge_with_previous(text)
 
         logger.debug(f"RAW:   {original}")
