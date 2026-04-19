@@ -10,6 +10,7 @@ class ModeController:
             "coding",
             "terminal",
             "direct",  # preferred over "raw"
+            "dictation",
         }
 
         self.aliases = {

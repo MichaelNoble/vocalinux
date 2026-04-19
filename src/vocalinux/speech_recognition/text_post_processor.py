@@ -16,49 +16,24 @@ class TextPostProcessor:
     def __init__(self):
         self.last_text = ""  # for future context-aware improvements
 
-    def process(self, text: str, mode: str = "clean") -> str:
+    _MODE_PIPELINE = {
+        "raw": ["_prepend_space_if_needed"],
+        "dictation": ["_normalize_whitespace", "_fix_spacing", "_soft_capitalize", "_prepend_space_if_needed"],
+        "clean": ["_normalize_whitespace", "_cleanup_punctuation", "_fix_spacing", "_capitalize_sentences",
+                  "_prepend_space_if_needed"],
+        "terminal": ["_normalize_whitespace", "_cleanup_punctuation", "_fix_spacing", "_prepend_space_if_needed"],
+        "coding": ["_normalize_whitespace", "_cleanup_punctuation", "_fix_spacing", "_prepend_space_if_needed"],
+    }
+
+    def process(self, text, mode="clean"):
         logger.info(f"Initial: {text} | mode={mode}")
 
-        if not text:
-            return ""
-
-        original = text
-
-        # RAW mode = minimal interference
-        if mode == "raw":
+        for step_name in self._MODE_PIPELINE.get(mode, self._MODE_PIPELINE["clean"]):
             text = text.strip()
-            text = self._merge_with_previous(text)
-            self.last_text = text
-            return text
-
-        # --- shared baseline ---
-        text = text.strip()
-        text = self._normalize_whitespace(text)
-
-        # CLEAN / STRICT / CODING share some behavior
-        if mode in ("clean", "strict", "coding", "terminal"):
-            text = self._cleanup_punctuation(text)
-            text = self._fix_spacing(text)
-
-        # STRICT = more aggressive corrections
-        # if mode == "strict":
-        #     text = self._aggressive_cleanup(text)  # (you can add later)
-        #
-        # # CODING = avoid messing with symbols too much
-        # if mode == "coding":
-        #     text = self._light_spacing(text)  # optional future tweak
-
-        # TERMINAL = minimal formatting, no capitalization
-        if mode != "terminal":
-            text = self._capitalize_sentences(text)
-
-        # Merge chunks LAST
-        text = self._merge_with_previous(text)
-
-        logger.debug(f"RAW:   {original}")
-        logger.debug(f"CLEAN: {text}")
+            text = getattr(self, step_name)(text)
 
         self.last_text = text
+        
         return text
 
     # -------------------------
@@ -96,14 +71,41 @@ class TextPostProcessor:
             return match.group(1) + match.group(2).upper()
 
         # Capitalize first letter and after punctuation
-        text = re.sub(r"(^|[.!?]\s+)([a-z])", capitalize, text)
+        text = re.sub(r"(^|(?<=[.!?])\s+)([a-z])", capitalize, text)
 
         # Fix lowercase "i"
         text = re.sub(r"\bi\b", "I", text)
 
         return text
 
-    def _merge_with_previous(self, text: str) -> str:
+    def _soft_capitalize(self, text: str) -> str:
+        if not text:
+            return text
+
+        logger.debug(f"_soft_capitalize: last_text='{self.last_text}' | incoming='{text}'")
+
+        terminal_punctuation = {".", "!", "?"}
+        stripped = self.last_text.rstrip()
+        last_char = stripped[-1] if stripped else ""
+        last_chars = stripped[-3:] if stripped else ""
+
+        ellipsis_ending = (last_char == "…" or last_chars == "...")
+
+        if ellipsis_ending:
+            return text[0].lower() + text[1:]
+
+        should_capitalize = (
+                not self.last_text
+                or last_char in terminal_punctuation
+        )
+
+        if should_capitalize:
+            return text[0].upper() + text[1:]
+        else:
+            return text[0].lower() + text[1:]
+
+
+    def _prepend_space_if_needed(self, text: str) -> str:
         if not text:
             return ""
 
