@@ -14,6 +14,7 @@ This is the preferred method for Wayland environments as it works universally
 without requiring compositor-specific protocols.
 """
 
+import json
 import logging
 import os
 import signal
@@ -542,6 +543,13 @@ class VocalinuxEngine(IBus.Engine if IBUS_AVAILABLE else object):
     _server_socket: Optional[socket.socket] = None
     _server_running: bool = False
 
+    # Context state — updated by IBus callbacks,
+    # read via GET_CONTEXT socket command
+    _surrounding_text: str = ""
+    _cursor_pos: int = 0
+    _context_changed: bool = False
+    _last_surrounding_text: str = ""
+
     def __init__(self):
         """Initialize the Vocalinux IBus engine."""
         if IBUS_AVAILABLE:
@@ -569,10 +577,23 @@ class VocalinuxEngine(IBus.Engine if IBUS_AVAILABLE else object):
         """Called when the engine gains focus."""
         logger.debug("VocalinuxEngine focus in")
         VocalinuxEngine._active_instance = self
+        VocalinuxEngine._context_changed = True
+        VocalinuxEngine._last_surrounding_text = VocalinuxEngine._surrounding_text
+        VocalinuxEngine._surrounding_text = ""
+        VocalinuxEngine._cursor_pos = 0
 
     def do_focus_out(self) -> None:
         """Called when the engine loses focus."""
         logger.debug("VocalinuxEngine focus out")
+
+    def do_set_surrounding_text(self, text: "IBus.Text", cursor_pos: int, anchor_pos: int) -> None:
+        """Called by IBus when the surrounding text changes."""
+        VocalinuxEngine._surrounding_text = text.get_text() if text else ""
+        VocalinuxEngine._cursor_pos = cursor_pos
+        logger.debug(
+            f"Surrounding text updated: '{VocalinuxEngine._surrounding_text[:30]}...' "
+            f"cursor={cursor_pos}"
+        )
 
     def do_process_key_event(self, keyval: int, keycode: int, state: int) -> bool:
         """
@@ -637,6 +658,26 @@ class VocalinuxEngine(IBus.Engine if IBUS_AVAILABLE else object):
                             data = conn.recv(65536)  # Max text size
                             if data:
                                 text = data.decode("utf-8")
+
+                                # GET_CONTEXT — return context state as JSON blob
+                                if text == "GET_CONTEXT":
+                                    surrounding = VocalinuxEngine._surrounding_text
+                                    last_surrounding = VocalinuxEngine._last_surrounding_text
+                                    cursor_pos = VocalinuxEngine._cursor_pos
+                                    context_changed = VocalinuxEngine._context_changed
+                                    # Reset the flag now that caller has read it
+                                    VocalinuxEngine._context_changed = False
+
+                                    payload = json.dumps({
+                                        "surrounding_text": surrounding,
+                                        "last_surrounding_text": last_surrounding,
+                                        "cursor_pos": cursor_pos,
+                                        "context_changed": context_changed,
+                                    })
+                                    conn.sendall(payload.encode("utf-8"))
+                                    continue
+
+                                # Otherwise treat as text injection request
                                 # Schedule injection on main thread
                                 if cls._active_instance:
 
@@ -925,7 +966,6 @@ class IBusTextInjector:
         except Exception as e:
             logger.error(f"Failed to inject text via IBus: {e}")
             return False
-
 
 def _get_engines_xml() -> str:
     """Return engine XML for IBus --xml discovery.
