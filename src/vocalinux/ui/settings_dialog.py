@@ -70,6 +70,7 @@ ENGINE_MODELS = {
         "small",
         "medium",
         "large",
+        "distil-large",
     ],  # whisper.cpp models (ggml format)
 }
 
@@ -80,6 +81,7 @@ WHISPER_MODEL_INFO = {
     "small": {"size_mb": 466, "desc": "Balanced speed/accuracy", "params": "244M"},
     "medium": {"size_mb": 1500, "desc": "High accuracy, slower", "params": "769M"},
     "large": {"size_mb": 2900, "desc": "Highest accuracy, slowest", "params": "1550M"},
+    "distil-large": {"size_mb": 1510, "desc": "Distil-Large v3.5 — fast, optimized for short-form/commands", "params": "756M"},
 }
 
 
