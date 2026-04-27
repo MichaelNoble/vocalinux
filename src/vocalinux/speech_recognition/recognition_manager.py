@@ -22,7 +22,7 @@ from ..utils.whispercpp_model_info import WHISPERCPP_MODEL_INFO, get_model_path,
 from .command_processor import CommandProcessor
 from .text_post_processor import TextPostProcessor
 from .mode_controller import ModeController
-
+from .whispercpp_config import WHISPER_MODE_PARAMS
 
 
 # ALSA error handler to suppress warnings during PyAudio initialization
@@ -535,9 +535,9 @@ class SpeechRecognitionManager:
         self.recognition_thread = None
         self.model = None
         self.recognizer = None  # Added for VOSK
+        self.mode_controller = ModeController()
         self.command_processor = CommandProcessor()
         self.text_post_processor = TextPostProcessor()
-        self.mode_controller = ModeController()
 
         # Voice commands: None=auto (VOSK=yes, Whisper=no), True=always on, False=always off
         self._voice_commands_preference = kwargs.get("voice_commands_enabled")
@@ -953,15 +953,34 @@ class SpeechRecognitionManager:
         logger.info("Successfully loaded model with CPU backend")
         return cpu_backend
 
-    def _transcribe_with_whispercpp(self, audio_buffer: list[bytes]) -> str:
-        """
-        Transcribe audio buffer using whisper.cpp.
+    def _transcribe_with_whispercpp(
+            self,
+            audio_buffer: list[bytes],
+            initial_prompt: str = "",
+            single_segment: bool = True,
+            suppress_blank=True,
+            temperature: float = 0.0,
+            no_context: bool = True,
+    ) -> str:
+        """ Transcribe audio buffer using whisper.cpp.
 
         Args:
-            audio_buffer: List of audio data chunks (16-bit PCM at 16kHz)
+            audio_buffer: List of audio data chunks (16-bit PCM at 16kHz).
+            initial_prompt: Text prepended to the decoder context to bias
+                vocabulary toward expected phrases. Empty string disables.
+            single_segment: Force output into a single segment, suppressing
+                mid-utterance punctuation and capitalization from Whisper.
+            suppress_non_speech_tokens: Filter filler/noise tokens like
+                [MUSIC] or [LAUGHTER] from output.
+            temperature: Decoder randomness. 0.0 is fully deterministic.
+                Small values (0.1) help dictation avoid repetition loops.
+            no_context: Ignore cached context from previous segments.
+                True for commands (each is independent), False for dictation.
+            beam_size: Number of decoder candidates to consider. 1 is greedy
+                (fastest), higher values improve accuracy on ambiguous phrases.
 
         Returns:
-            Transcribed text
+            Transcribed text string, empty string on failure or silence.
         """
         import time
 
@@ -1004,7 +1023,15 @@ class SpeechRecognitionManager:
                 # Transcribe with whisper.cpp
                 # pywhispercpp expects audio as numpy array
                 transcribe_start = time.time()
-                segments = self.model.transcribe(audio_float, language=lang)
+                segments = self.model.transcribe(
+                    audio_float,
+                    language=lang,
+                    initial_prompt=initial_prompt or None,
+                    single_segment=single_segment,
+                    suppress_blank=True,
+                    temperature=temperature,
+                    no_context=no_context,
+                )
                 transcribe_duration = time.time() - transcribe_start
 
             # Extract text from segments, filtering non-speech tokens
@@ -1901,7 +1928,8 @@ class SpeechRecognitionManager:
             text = self._transcribe_with_whisper(audio_buffer)
 
         elif self.engine == "whisper_cpp":
-            text = self._transcribe_with_whispercpp(audio_buffer)
+            params = WHISPER_MODE_PARAMS.get(self.mode_controller.mode, WHISPER_MODE_PARAMS["clean"])
+            text = self._transcribe_with_whispercpp(audio_buffer, **params)
 
         else:
             logger.error(f"Unknown engine: {self.engine}")
@@ -1914,20 +1942,24 @@ class SpeechRecognitionManager:
 
         if text:
             mode, consumed = self.mode_controller.handle(text)
+
             if consumed:
                 logger.info(f"[MODE] → {mode}")
                 return
 
-            processed_text = self.text_post_processor.process(
-                text,
-                mode=self.mode_controller.mode
-            )
-
-            # Optional command processing
+            # Command processor runs first on raw transcription
             if self._voice_commands_enabled:
-                processed_text, actions = self.command_processor.process_text(processed_text)
+                processed_text, actions = self.command_processor.process_text(text)
+                was_transformed = processed_text != text
             else:
-                actions = []
+                processed_text = text
+                was_transformed = False
+
+            processed_text = self.text_post_processor.process(
+                processed_text,
+                mode=self.mode_controller.mode,
+                was_transformed=was_transformed,
+            )
 
         # Call text callbacks with processed text
         logger.info(
