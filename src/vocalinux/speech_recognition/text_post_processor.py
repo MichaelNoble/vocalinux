@@ -30,13 +30,14 @@ class TextPostProcessor:
         "coding": ["_normalize_whitespace", "_cleanup_punctuation", "_handle_boundaries"],
     }
 
-    def process(self, text, mode="dictation"):
+    def process(self, text, mode="dictation", was_transformed=False):
         logger.info(f"Initial: {text} | mode={mode}")
 
         context = get_context()
         self.cursor_pos = context["cursor_pos"]
         self.surrounding = context["surrounding_text"]
         self.context_changed = context["context_changed"]
+        self.was_transformed = was_transformed
 
         if self.surrounding:
             self.chars_before = self.surrounding[max(0, self.cursor_pos - 3):self.cursor_pos]
@@ -51,7 +52,7 @@ class TextPostProcessor:
         )
 
         for step_name in self._MODE_PIPELINE.get(mode, self._MODE_PIPELINE["clean"]):
-            text = text.lstrip()
+            text = text.lstrip(" \t")   # not \n
             text = getattr(self, step_name)(text)
 
         self.last_text = text
@@ -64,8 +65,8 @@ class TextPostProcessor:
 
     def _normalize_whitespace(self, text: str) -> str:
         # Collapse multiple spaces
-        text = re.sub(r"\s+", " ", text)
-        return text.strip()
+        text = re.sub(r"[ \t]+", " ", text)
+        return text.strip(" \t")  # not newlines
 
     def _cleanup_punctuation(self, text: str) -> str:
         # Remove space before punctuation
@@ -90,6 +91,9 @@ class TextPostProcessor:
         def capitalize(match):
             return match.group(1) + match.group(2).upper()
 
+        if self.was_transformed:
+            return text
+
         # If inserting mid-sentence, lowercase the first character
         if self.chars_before and self.chars_after:
             source = self.chars_before.rstrip()
@@ -107,6 +111,9 @@ class TextPostProcessor:
 
     def _soft_capitalize(self, text: str) -> str:
         if not text:
+            return text
+
+        if self.was_transformed:
             return text
 
         logger.debug(
@@ -225,8 +232,10 @@ class TextPostProcessor:
     def _handle_boundaries(self, text: str) -> str:
         if not text:
             return ""
+        if self.was_transformed:
+            return text  # trust the command processor output entirely
 
-        text = text.lstrip()
+        text = text.lstrip(" \t")
 
         # --------------------------------
         # Establish effective context

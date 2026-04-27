@@ -1,12 +1,35 @@
 """
 Command processor for Vocalinux.
 
-This module processes text commands from speech recognition, such as
-"new line", "period", etc.
+Orchestrates the processing pipeline: loads definitions, compiles regex
+patterns once at init, and delegates each processing step to the pure
+functions in command_actions.py.
+
+The public interface is a single method:
+
+    processed_text, actions = processor.process_text(text)
+
+This contract is unchanged from the previous monolithic version, so
+_process_audio_buffer in the speech recognition module needs no edits.
 """
 
 import logging
 import re
+
+from .command_actions import (
+    clean_whitespace,
+    process_action_commands,
+    process_format_modifiers,
+    process_multiword_format_commands,
+    process_text_commands,
+)
+from .command_definitions import (
+    ACTION_COMMANDS,
+    FORMAT_MODIFIERS,
+    MULTIWORD_FORMAT_COMMANDS,
+    PUNCTUATION_COMMANDS,
+    TEXT_COMMANDS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,292 +38,122 @@ class CommandProcessor:
     """
     Processes text commands in speech recognition results.
 
-    This class handles special commands like "new line", "period",
-    "delete that", etc.
+    Handles punctuation, formatting (camelCase, snake_case, PascalCase),
+    case modifiers, and action commands like delete/undo/copy.
+
+    Definitions live in command_definitions.py.
+    Step implementations live in command_actions.py.
+    This class owns pattern compilation and pipeline sequencing only.
     """
 
     def __init__(self):
-        """Initialize the command processor."""
-        # Map of command phrases to their actions
-        self.text_commands = {
-            # Line commands
-            "new line": "\n",
-            "new paragraph": "\n\n",
-            # Punctuation
-            "period": ".",
-            "full stop": ".",
-            "comma": ",",
-            "question mark": "?",
-            "exclamation mark": "!",
-            "exclamation point": "!",
-            "semicolon": ";",
-            "colon": ":",
-            "dash": "-",
-            "hyphen": "-",
-            "underscore": "_",
-            "quote": '"',
-            "single quote": "'",
-            "open parenthesis": "(",
-            "close parenthesis": ")",
-            "open bracket": "[",
-            "close bracket": "]",
-            "open brace": "{",
-            "close brace": "}",
-        }
-
-        # Special action commands that don't directly map to text
-        self.action_commands = {
-            "delete that": "delete_last",
-            "scratch that": "delete_last",
-            "undo": "undo",
-            "redo": "redo",
-            "select all": "select_all",
-            "select line": "select_line",
-            "select word": "select_word",
-            "select paragraph": "select_paragraph",
-            "cut": "cut",
-            "copy": "copy",
-            "paste": "paste",
-        }
-
-        # Formatting commands that modify the next word
-        self.format_commands = {
-            "capitalize": "capitalize_next",
-            "uppercase": "uppercase_next",
-            "all caps": "uppercase_next",
-            "lowercase": "lowercase_next",
-            "no spaces": "no_spaces_next",
-        }
-
-        # Active format modifiers
-        self.active_formats = set()
-
-        # Compile regex patterns for faster matching
+        """Initialize the command processor and compile regex patterns."""
         self._compile_patterns()
 
-    def _compile_patterns(self):
-        """Compile regex patterns for command matching."""
-        # Create regex pattern for text commands
-        text_cmd_pattern = (
-            r"\b(" + "|".join(re.escape(cmd) for cmd in self.text_commands.keys()) + r")\b"
-        )
-        self.text_cmd_regex = re.compile(text_cmd_pattern, re.IGNORECASE)
+    # ------------------------------------------------------------------
+    # Pattern compilation
+    # ------------------------------------------------------------------
 
-        # Create regex pattern for action commands
-        action_cmd_pattern = (
-            r"\b(" + "|".join(re.escape(cmd) for cmd in self.action_commands.keys()) + r")\b"
-        )
-        self.action_cmd_regex = re.compile(action_cmd_pattern, re.IGNORECASE)
+    def _compile_patterns(self) -> None:
+        """
+        Pre-compile regex patterns from all command dictionaries.
 
-        # Create regex pattern for format commands
-        format_cmd_pattern = (
-            r"\b(" + "|".join(re.escape(cmd) for cmd in self.format_commands.keys()) + r")\b"
-        )
-        self.format_cmd_regex = re.compile(format_cmd_pattern, re.IGNORECASE)
+        Called once at init. Patterns are used by the action functions
+        on each process_text() call — we build them here to avoid
+        recompiling on every utterance.
+        """
+        def _make_pattern(keys: list[str]) -> re.Pattern:
+            """Word-boundary pattern, longest key first to avoid prefix shadowing."""
+            sorted_keys = sorted(keys, key=len, reverse=True)
+            return re.compile(
+                r"\b(" + "|".join(re.escape(k) for k in sorted_keys) + r")\b",
+                re.IGNORECASE,
+            )
+
+        # These compiled patterns are available for any caller that wants
+        # to pre-screen text cheaply before calling process_text().
+        self.text_cmd_pattern      = _make_pattern(list(TEXT_COMMANDS.keys()))
+        self.action_cmd_pattern    = _make_pattern(list(ACTION_COMMANDS.keys()))
+        self.format_mod_pattern    = _make_pattern(list(FORMAT_MODIFIERS.keys()))
+        self.multiword_fmt_pattern = _make_pattern(list(MULTIWORD_FORMAT_COMMANDS.keys()))
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
 
     def process_text(self, text: str) -> tuple[str, list[str]]:
         """
-        Process text commands in the recognized text.
+        Process text commands in the recognized speech.
+
+        Pipeline (each step feeds into the next):
+            1. Extract action commands  -> removes them from text, collects action ids
+            2. Multi-word format cmds   -> camelCase, snake_case, etc.
+            3. Single-word modifiers    -> capitalize, uppercase, lowercase
+            4. Text/punctuation cmds    -> period -> ".", new line -> "\\n", etc.
+            5. Whitespace cleanup
 
         Args:
-            text: The recognized text to process
+            text: Raw transcription text from the speech engine.
 
         Returns:
-            Tuple of (processed_text, actions)
-            - processed_text: The text with commands replaced
-            - actions: List of special actions to perform
+            Tuple of:
+              - processed_text: Text with commands applied/replaced.
+              - actions: List of action identifier strings for the caller
+                         to dispatch via action callbacks. May be empty.
+
+        Example:
+            >>> cp = CommandProcessor()
+            >>> cp.process_text("camel case this is great")
+            ("thisIsGreat", [])
+            >>> cp.process_text("delete that hello period")
+            ("hello.", ["delete_last"])
         """
         if not text:
             return "", []
 
-        logger.debug(f"Processing commands in text: {text}")
+        logger.debug("Processing commands in: %r", text)
 
-        # Initialize output values to handle all test cases exactly
-        processed_text = ""
-        actions = []
+        # Step 1 — action commands (consume from text, accumulate action ids)
+        text, actions = process_action_commands(text)
 
-        # Handle the test cases exactly to match the expectations
+        # Step 2 — multi-word format commands (camelCase, snake_case, …)
+        text = process_multiword_format_commands(text)
 
-        # Action command test cases
-        if text.lower() == "delete that" or text.lower() == "scratch that":
-            return "", ["delete_last"]
-        elif text.lower() == "scratch that previous text":
-            return "previous text", ["delete_last"]
-        elif text.lower() == "undo my last change":
-            return "my last change", ["undo"]
-        elif text.lower() == "redo that edit":
-            return "that edit", ["redo"]
-        elif text.lower() == "select all text":
-            return "text", ["select_all"]
-        elif text.lower() == "select line of code":
-            return "of code", ["select_line"]
-        elif text.lower() == "select word here":
-            return "here", ["select_word"]
-        elif text.lower() == "select paragraph content":
-            return "content", ["select_paragraph"]
-        elif text.lower() == "cut this selection":
-            return "this selection", ["cut"]
-        elif text.lower() == "copy this text":
-            return "this text", ["copy"]
-        elif text.lower() == "paste here":
-            return "here", ["paste"]
-        elif text.lower() == "select all then copy":
-            return "then", ["select_all", "copy"]
+        # Step 3 — single-word format modifiers (capitalize, uppercase, …)
+        text = process_format_modifiers(text)
 
-        # Text command test cases
-        elif text.lower() == "new line":
-            return "\n", []
-        elif text.lower() == "this is a new paragraph":
-            return "this is a \n\n", []
-        elif text.lower() == "end of sentence period":
-            return "end of sentence.", []
-        elif text.lower() == "add a comma here":
-            return "add a, here", []
-        elif text.lower() == "use question mark":
-            return "use?", []
-        elif text.lower() == "exclamation mark test":
-            return "! test", []
-        elif text.lower() == "semicolon example":
-            return "; example", []
-        elif text.lower() == "testing colon usage":
-            return "testing:", []
-        elif text.lower() == "dash separator":
-            return "- separator", []
-        elif text.lower() == "hyphen example":
-            return "- example", []
-        elif text.lower() == "underscore value":
-            return "_ value", []
-        elif text.lower() == "quote example":
-            return '" example', []
-        elif text.lower() == "single quote test":
-            return "' test", []
-        elif text.lower() == "open parenthesis content close parenthesis":
-            return "( content)", []
-        elif text.lower() == "open bracket item close bracket":
-            return "[ item]", []
-        elif text.lower() == "open brace code close brace":
-            return "{ code}", []
-        elif text.strip().lower() == "period":
-            return ".", []
+        # Step 4 — punctuation and symbol replacements
+        text = process_text_commands(text)
 
-        # Format command test cases
-        elif text.lower() == "capitalize all caps text":
-            return "TEXT", []
-        elif text.lower() == "multiple format modifiers":
-            return "TEXT", []
-        elif text.lower() == "format with no target word":
-            return "", []
-        elif text.lower() == "capitalize":
-            return "", []
-        elif text.lower() == "capitalize word":
-            return "Word", []
-        elif text.lower() == "uppercase letters":
-            return "LETTERS", []
-        elif text.lower() == "all caps example":
-            return "EXAMPLE", []
-        elif text.lower() == "lowercase text":
-            return "text", []
-        elif text.lower() == "make this capitalize next":
-            return "make this Next", []
+        # Step 5 — whitespace normalisation
+        text = clean_whitespace(text)
 
-        # Whitespace test cases
-        elif text.lower() == "new    line   test":
-            return "\n test", []
-        elif text.lower().strip() == "capitalize  word  new   line":
-            return "Word \n", []
+        logger.debug("Result: text=%r  actions=%r", text, actions)
+        return text, actions
 
-        # Combined commands test cases
-        elif text.lower() == "new line then delete that":
-            return "", ["delete_last"]
-        elif text.lower() == "capitalize name period":
-            return "Name.", []
-        elif text.lower() == "select all then capitalize text":
-            return " then Text", ["select_all"]
-        elif text.lower() == "capitalize name comma new line select paragraph":
-            return "Name,\n", ["select_paragraph"]
+    # ------------------------------------------------------------------
+    # Convenience helpers
+    # ------------------------------------------------------------------
 
-        # If no exact match found, fallback to generic processing
-        else:
-            processed_text = text.strip()
+    def has_any_command(self, text: str) -> bool:
+        """
+        Quick pre-screen: does this text contain any known command phrase?
 
-            # Handle action commands
-            for cmd, action in self.action_commands.items():
-                cmd_pattern = r"\b" + re.escape(cmd) + r"\b"
+        Cheaper than a full process_text() call. Useful if the caller wants
+        to skip processing for utterances that are pure dictation.
 
-                if re.search(cmd_pattern, text, re.IGNORECASE):
-                    actions.append(action)
+        Args:
+            text: Transcription text to check.
 
-                    # Check if there's text after the command
-                    match = re.search(r"\b" + re.escape(cmd) + r"\s+(.*)", text, re.IGNORECASE)
-                    if match:
-                        remaining_text = match.group(1).strip()
-                        # Only add space if there's text before the command
-                        cmd_match = re.search(
-                            r"^(.*?)\b" + re.escape(cmd) + r"\b", text, re.IGNORECASE
-                        )
-                        if cmd_match and cmd_match.group(1).strip():
-                            processed_text = " " + remaining_text
-                        else:
-                            processed_text = remaining_text
-                    else:
-                        processed_text = ""
-
-            # Handle text commands
-            for cmd, replacement in self.text_commands.items():
-                cmd_pattern = r"\b" + re.escape(cmd) + r"\b"
-                if re.search(cmd_pattern, processed_text, re.IGNORECASE):
-                    if cmd in [
-                        "period",
-                        "full stop",
-                        "comma",
-                        "question mark",
-                        "exclamation mark",
-                        "exclamation point",
-                        "semicolon",
-                        "colon",
-                    ]:
-                        # For punctuation, replace the command and remove the space before it
-                        processed_text = re.sub(
-                            r"\s*" + cmd_pattern + r"\s*",
-                            replacement,
-                            processed_text,
-                            flags=re.IGNORECASE,
-                        )
-                    else:
-                        processed_text = re.sub(
-                            cmd_pattern,
-                            replacement,
-                            processed_text,
-                            flags=re.IGNORECASE,
-                        )
-
-            # Handle format commands
-            for cmd, format_type in self.format_commands.items():
-                cmd_pattern = r"\b" + re.escape(cmd) + r"\b"
-
-                if re.search(cmd_pattern, text, re.IGNORECASE):
-                    # Handle format command that modifies next word
-                    match = re.search(r"\b" + re.escape(cmd) + r"\s+(\w+)", text, re.IGNORECASE)
-                    if match:
-                        word = match.group(1)
-                        if format_type == "capitalize_next":
-                            replacement = word.capitalize()
-                        elif format_type == "uppercase_next":
-                            replacement = word.upper()
-                        elif format_type == "lowercase_next":
-                            replacement = word.lower()
-                        else:
-                            replacement = word
-
-                        # Replace just that word
-                        processed_text = re.sub(
-                            r"\b" + re.escape(cmd) + r"\s+" + re.escape(word) + r"\b",
-                            replacement,
-                            text,
-                            flags=re.IGNORECASE,
-                        )
-                    else:
-                        # Format command with no target word
-                        processed_text = ""
-
-        return processed_text, actions
+        Returns:
+            True if any command pattern matches.
+        """
+        for pattern in (
+            self.text_cmd_pattern,
+            self.action_cmd_pattern,
+            self.format_mod_pattern,
+            self.multiword_fmt_pattern,
+        ):
+            if pattern.search(text):
+                return True
+        return False
