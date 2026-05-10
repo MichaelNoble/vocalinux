@@ -530,6 +530,7 @@ class SpeechRecognitionManager:
         self.engine = engine
         self.model_size = model_size
         self.language = language
+        self.stop_sound_guard_ms = kwargs.get("stop_sound_guard_ms", 200)
         self.state = RecognitionState.IDLE
         self.audio_thread = None
         self.recognition_thread = None
@@ -559,6 +560,16 @@ class SpeechRecognitionManager:
 
         # Audio device selection (None means use system default)
         self.audio_device_index = kwargs.get("audio_device_index", None)
+
+        # whisper.cpp advanced parameters
+        self.whispercpp_no_timestamps = kwargs.get("whispercpp_no_timestamps", True)
+        self.whispercpp_no_context = kwargs.get("whispercpp_no_context", True)
+        self.whispercpp_initial_prompt = kwargs.get("whispercpp_initial_prompt", "")
+        self.whispercpp_temperature = kwargs.get("whispercpp_temperature", 0.0)
+        self.whispercpp_temperature_inc = kwargs.get("whispercpp_temperature_inc", -1.0)
+        self.whispercpp_entropy_thold = kwargs.get("whispercpp_entropy_thold", 2.4)
+        self.whispercpp_logprob_thold = kwargs.get("whispercpp_logprob_thold", -1.0)
+        self.whispercpp_no_speech_thold = kwargs.get("whispercpp_no_speech_thold", 0.6)
 
         # Audio diagnostics tracking
         self._last_audio_level = 0.0
@@ -837,6 +848,78 @@ class SpeechRecognitionManager:
             self.state = RecognitionState.ERROR
             raise
 
+    def _build_whispercpp_model_kwargs(self, n_threads: int) -> dict:
+        model_kwargs = {
+            "n_threads": n_threads,
+            "suppress_blank": True,
+            "no_speech_thold": self.whispercpp_no_speech_thold,
+            "entropy_thold": self.whispercpp_entropy_thold,
+            "logprob_thold": self.whispercpp_logprob_thold,
+            "temperature": self.whispercpp_temperature,
+            "temperature_inc": self.whispercpp_temperature_inc,
+        }
+        if self.whispercpp_no_timestamps:
+            model_kwargs["no_timestamps"] = True
+        if self.whispercpp_no_context:
+            model_kwargs["no_context"] = True
+        if self.whispercpp_initial_prompt:
+            model_kwargs["initial_prompt"] = self.whispercpp_initial_prompt
+        return model_kwargs
+
+    def _get_supported_whispercpp_params(self) -> Optional[set[str]]:
+        """Return params supported by the active pywhispercpp native binding."""
+        try:
+            import _pywhispercpp as pw
+
+            params = pw.whisper_full_default_params(
+                pw.whisper_sampling_strategy.WHISPER_SAMPLING_GREEDY
+            )
+            return {name for name in dir(params) if not name.startswith("_")}
+        except Exception as e:
+            logger.debug(f"Could not inspect pywhispercpp params; using conservative filter: {e}")
+            return None
+
+    def _filter_whispercpp_model_kwargs(
+        self, model_kwargs: dict, supported_params: Optional[set[str]] = None
+    ) -> dict:
+        """Filter model kwargs before constructing pywhispercpp.Model.
+
+        Some pywhispercpp releases segfault when a partially constructed Model is
+        garbage-collected after an unsupported native param raises AttributeError.
+        Filtering against the bound params object avoids that unsafe retry path.
+        """
+        if supported_params is None:
+            supported_params = self._get_supported_whispercpp_params()
+
+        if supported_params is None:
+            supported_params = {
+                "n_threads",
+                "suppress_blank",
+                "no_speech_thold",
+                "entropy_thold",
+                "logprob_thold",
+                "temperature",
+                "temperature_inc",
+                "no_context",
+                "initial_prompt",
+            }
+
+        compatible_kwargs = {}
+        for param_name, value in model_kwargs.items():
+            if param_name in supported_params:
+                compatible_kwargs[param_name] = value
+            else:
+                logger.warning(
+                    f"pywhispercpp does not support '{param_name}'; " "removing from model kwargs."
+                )
+        return compatible_kwargs
+
+    def _load_model_with_compatible_params(self, model_path: str, model_kwargs: dict):
+        from pywhispercpp.model import Model
+
+        compatible_kwargs = self._filter_whispercpp_model_kwargs(model_kwargs)
+        return Model(model_path, **compatible_kwargs)
+
     def _load_whispercpp_model(self, model_path: str):
         """Load the whisper.cpp model file and configure the compute backend.
 
@@ -884,18 +967,14 @@ class SpeechRecognitionManager:
         load_start_time = time.time()
         loaded_backend = backend
 
-        # Attempt to load model; fall back to CPU if GPU backend is incompatible
+        model_kwargs = self._build_whispercpp_model_kwargs(n_threads)
+
+        # Attempt to load model; filter unsupported params and fall back to CPU if needed
         try:
-            self.model = Model(
-                model_path,
-                n_threads=n_threads,
-                suppress_blank=True,
-                no_speech_thold=0.6,
-                entropy_thold=2.4,
-            )
+            self.model = self._load_model_with_compatible_params(model_path, model_kwargs)
         except RuntimeError as model_error:
             loaded_backend = self._handle_gpu_fallback(
-                model_error, model_path, n_threads, ComputeBackend.CPU
+                model_error, model_path, model_kwargs, ComputeBackend.CPU
             )
 
         load_duration = time.time() - load_start_time
@@ -908,13 +987,13 @@ class SpeechRecognitionManager:
         self._model_initialized = True
         logger.info("whisper.cpp engine initialized successfully.")
 
-    def _handle_gpu_fallback(self, error, model_path: str, n_threads: int, cpu_backend):
+    def _handle_gpu_fallback(self, error, model_path: str, model_kwargs: dict, cpu_backend):
         """Handle GPU backend failure by falling back to CPU.
 
         Args:
             error: The RuntimeError from model loading.
             model_path: Path to the GGML model file.
-            n_threads: Number of CPU threads for the model.
+            model_kwargs: Dict of keyword arguments for pywhispercpp.Model.
             cpu_backend: The CPU ComputeBackend enum value.
 
         Returns:
@@ -923,8 +1002,6 @@ class SpeechRecognitionManager:
         Raises:
             RuntimeError: If the error is not a known GPU incompatibility.
         """
-        from pywhispercpp.model import Model
-
         error_str = str(error).lower()
         gpu_incompatible = (
             "16-bit storage" in error_str
@@ -943,13 +1020,7 @@ class SpeechRecognitionManager:
         # Force CPU backend by disabling GPU backends
         os.environ["GGML_VULKAN"] = "0"
         os.environ["GGML_CUDA"] = "0"
-        self.model = Model(
-            model_path,
-            n_threads=n_threads,
-            suppress_blank=True,
-            no_speech_thold=0.6,
-            entropy_thold=2.4,
-        )
+        self.model = self._load_model_with_compatible_params(model_path, model_kwargs)
         logger.info("Successfully loaded model with CPU backend")
         return cpu_backend
 
@@ -1521,6 +1592,19 @@ class SpeechRecognitionManager:
         """Check if the model is initialized and ready for recognition."""
         return self._model_initialized and self.model is not None
 
+    def _get_stop_sound_guard_chunks(self) -> int:
+        """Convert the configured stop-sound guard to 16kHz chunk count."""
+        try:
+            guard_ms = max(0, int(self.stop_sound_guard_ms))
+        except (TypeError, ValueError):
+            logger.warning(
+                f"Invalid stop_sound_guard_ms value: {self.stop_sound_guard_ms}. Using default 200ms."
+            )
+            guard_ms = 200
+
+        chunk_duration_ms = (1024 / 16000) * 1000
+        return int(guard_ms / chunk_duration_ms)
+
     def start_recognition(self, mode: str = "toggle"):
         """Start the speech recognition process."""
         if self.state != RecognitionState.IDLE:
@@ -1578,23 +1662,20 @@ class SpeechRecognitionManager:
         if self.audio_thread and self.audio_thread.is_alive():
             self.audio_thread.join(timeout=2.0)
 
-        # Discard the last ~1 second of audio to avoid transcribing the stop sound
-        # Audio is recorded in 1024-sample chunks at 16000 Hz = ~64ms per chunk
-        # We discard the last 15 chunks (~1 second) which should contain the feedback sound
+        # Trim only a small tail to avoid the stop sound without clipping the user's final word.
         with self._buffer_lock:
-            if len(self.audio_buffer) > 15:
-                discarded_chunks = self.audio_buffer[-15:]
-                self.audio_buffer = self.audio_buffer[:-15]
+            stop_sound_guard_chunks = self._get_stop_sound_guard_chunks()
+            if stop_sound_guard_chunks > 0 and len(self.audio_buffer) > stop_sound_guard_chunks:
+                discarded_chunks = self.audio_buffer[-stop_sound_guard_chunks:]
+                self.audio_buffer = self.audio_buffer[:-stop_sound_guard_chunks]
                 logger.debug(
-                    f"Discarded {len(discarded_chunks)} audio chunks to avoid transcribing feedback sound"
+                    "Discarded %s audio chunks (~%sms) to avoid transcribing feedback sound",
+                    len(discarded_chunks),
+                    self.stop_sound_guard_ms,
                 )
-            elif self.audio_buffer:
-                # If buffer is small, just clear it entirely to be safe
-                logger.debug(f"Clearing small audio buffer ({len(self.audio_buffer)} chunks)")
-                self.audio_buffer = []
 
             if self.audio_buffer:
-                logger.info(f"DEBUG: Enqueuing final buffer with {len(self.audio_buffer)} chunks")
+                logger.debug(f"Enqueuing final buffer with {len(self.audio_buffer)} chunks")
                 self._enqueue_audio_segment(self.audio_buffer)
                 self.audio_buffer = []
 
@@ -1908,10 +1989,7 @@ class SpeechRecognitionManager:
             return
 
         # Process text - either with voice commands or pass through directly
-        logger.info(
-            f"DEBUG: _process_audio_buffer got text='{text[:50] if text else '(empty)'}...'"
-        )
-
+            logger.debug(f"_process_audio_buffer got text='{text[:50] if text else '(empty)'}...'")
         if text:
             mode, consumed = self.mode_controller.handle(text)
             if consumed:
@@ -1927,16 +2005,18 @@ class SpeechRecognitionManager:
             if self._voice_commands_enabled:
                 processed_text, actions = self.command_processor.process_text(processed_text)
             else:
+                # Voice commands disabled - pass text through directly (Whisper handles punctuation)
+                processed_text = text.strip()
                 actions = []
 
         # Call text callbacks with processed text
-        logger.info(
-            f"DEBUG: processed_text='{processed_text[:50] if processed_text else '(empty)'}...', callbacks={len(self.text_callbacks)}"
+        logger.debug(
+            f"processed_text='{processed_text[:50] if processed_text else '(empty)'}...', callbacks={len(self.text_callbacks)}"
         )
         if processed_text:
             for callback in self.text_callbacks:
-                logger.info(
-                    f"DEBUG: invoking text callback: {callback.__name__ if hasattr(callback, '__name__') else callback}"
+                logger.debug(
+                    f"invoking text callback: {callback.__name__ if hasattr(callback, '__name__') else callback}"
                 )
                 callback(processed_text)
 
@@ -1947,89 +2027,65 @@ class SpeechRecognitionManager:
 
     def _perform_recognition(self):
         """Perform speech recognition in real-time."""
-        logger.info("DEBUG: _perform_recognition thread started")
+        logger.debug("_perform_recognition thread started")
         while True:
             logger.debug(
-                f"DEBUG: Recognition loop - should_record={self.should_record}, queue_empty={self._segment_queue.empty()}"
+                f"Recognition loop - should_record={self.should_record}, queue_empty={self._segment_queue.empty()}"
             )
             try:
                 segment = self._segment_queue.get(timeout=0.1)
             except queue.Empty:
                 # Only exit if we're not recording AND queue is empty
                 if not self.should_record and self._segment_queue.empty():
-                    logger.info(
-                        "DEBUG: Recognition loop - not recording and queue empty, checking for final items..."
+                    logger.debug(
+                        "Recognition loop - not recording and queue empty, checking for final items..."
                     )
                     # Give a brief moment for any final items to be enqueued
                     try:
                         segment = self._segment_queue.get(timeout=0.5)
                     except queue.Empty:
-                        logger.info("DEBUG: Recognition loop - no more items, exiting")
+                        logger.debug("Recognition loop - no more items, exiting")
                         break
                 else:
-                    logger.debug("DEBUG: Recognition loop - queue timeout, continuing")
+                    logger.debug("Recognition loop - queue timeout, continuing")
                     continue
 
             if segment is None:
-                logger.info(
-                    "DEBUG: Recognition loop - got None signal, draining remaining items..."
-                )
+                logger.debug("Recognition loop - got None signal, draining remaining items...")
                 # Drain any remaining items before exiting
                 while not self._segment_queue.empty():
                     try:
                         remaining = self._segment_queue.get_nowait()
                         if remaining is not None:
-                            logger.info(
-                                f"DEBUG: Recognition loop - processing remaining segment with {len(remaining)} chunks"
+                            logger.debug(
+                                f"Recognition loop - processing remaining segment with {len(remaining)} chunks"
                             )
                             self._update_state(RecognitionState.PROCESSING)
                             self._process_audio_buffer(remaining)
                     except queue.Empty:
                         break
-                logger.info("DEBUG: Recognition loop - exiting after None signal")
+                logger.debug("Recognition loop - exiting after None signal")
                 break
 
-            logger.info(f"DEBUG: Recognition loop - processing segment with {len(segment)} chunks")
+            logger.debug(f"Recognition loop - processing segment with {len(segment)} chunks")
             self._update_state(RecognitionState.PROCESSING)
             self._process_audio_buffer(segment)
             if self.should_record:
                 self._update_state(RecognitionState.LISTENING)
-        logger.info("DEBUG: _perform_recognition thread exiting")
-        """Perform speech recognition in real-time."""
-        logger.info("DEBUG: _perform_recognition thread started")
-        while self.should_record or not self._segment_queue.empty():
-            logger.debug(
-                f"DEBUG: Recognition loop - should_record={self.should_record}, queue_empty={self._segment_queue.empty()}"
-            )
-            try:
-                segment = self._segment_queue.get(timeout=0.1)
-            except queue.Empty:
-                logger.debug("DEBUG: Recognition loop - queue timeout, continuing")
-                continue
-
-            if segment is None:
-                logger.info("DEBUG: Recognition loop - got None signal, continuing")
-                continue
-
-            logger.info(f"DEBUG: Recognition loop - processing segment with {len(segment)} chunks")
-            self._update_state(RecognitionState.PROCESSING)
-            self._process_audio_buffer(segment)
-            if self.should_record:
-                self._update_state(RecognitionState.LISTENING)
-        logger.info("DEBUG: _perform_recognition thread exiting")
+        logger.debug("_perform_recognition thread exiting")
 
     def _enqueue_audio_segment(self, audio_buffer: list[bytes]):
         """Queue an audio segment for asynchronous transcription."""
         segment = audio_buffer.copy()
         if not segment:
-            logger.warning("DEBUG: _enqueue_audio_segment called with empty buffer")
+            logger.warning("_enqueue_audio_segment called with empty buffer")
             return
 
-        logger.info(f"DEBUG: _enqueue_audio_segment called with {len(segment)} chunks")
+        logger.debug(f"_enqueue_audio_segment called with {len(segment)} chunks")
 
         try:
             self._segment_queue.put_nowait(segment)
-            logger.info("DEBUG: Enqueued segment successfully")
+            logger.debug("Enqueued segment successfully")
         except queue.Full:
             logger.warning("Transcription queue is full, dropping oldest pending segment")
             try:
@@ -2107,6 +2163,23 @@ class SpeechRecognitionManager:
 
         if "voice_commands_enabled" in kwargs:
             self._voice_commands_preference = kwargs.get("voice_commands_enabled")
+
+        if "stop_sound_guard_ms" in kwargs:
+            self.stop_sound_guard_ms = kwargs.get("stop_sound_guard_ms", self.stop_sound_guard_ms)
+
+        for param_name in (
+            "whispercpp_no_timestamps",
+            "whispercpp_no_context",
+            "whispercpp_initial_prompt",
+            "whispercpp_temperature",
+            "whispercpp_temperature_inc",
+            "whispercpp_entropy_thold",
+            "whispercpp_logprob_thold",
+            "whispercpp_no_speech_thold",
+        ):
+            if param_name in kwargs:
+                setattr(self, param_name, kwargs[param_name])
+                restart_needed = True
 
         self._voice_commands_enabled = self._resolve_voice_commands_enabled()
 
