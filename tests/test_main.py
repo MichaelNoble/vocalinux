@@ -215,12 +215,21 @@ class TestMainModule(unittest.TestCase):
             # Verify components were initialized correctly
             mock_speech.assert_called_once_with(
                 engine="vosk",
-                language="en-us",
                 model_size="medium",
+                language="en-us",
                 vad_sensitivity=3,
                 silence_timeout=2.0,
-                audio_device_index=None,
+                stop_sound_guard_ms=200,
                 voice_commands_enabled=None,
+                audio_device_index=None,
+                whispercpp_no_timestamps=True,
+                whispercpp_no_context=True,
+                whispercpp_initial_prompt="",
+                whispercpp_temperature=0.0,
+                whispercpp_temperature_inc=-1.0,
+                whispercpp_entropy_thold=2.4,
+                whispercpp_logprob_thold=-1.0,
+                whispercpp_no_speech_thold=0.6,
             )
             mock_text.assert_called_once_with(wayland_mode=True)
             mock_action_handler.assert_called_once_with(mock_text_instance)
