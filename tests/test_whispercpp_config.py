@@ -133,3 +133,21 @@ def test_invalid_numeric_setting_stops_before_inference(manager, caplog):
         assert manager._transcribe_with_whispercpp([b"\0\0" * 1600], mode="dictation") == ""
     assert manager.model.calls == []
     assert "entropy_thold" in caplog.text
+
+
+@pytest.mark.parametrize("setting", [True, False])
+def test_optional_timestamps_missing_from_older_binding_still_transcribes(manager, caplog, setting):
+    manager.whispercpp_no_timestamps = setting
+    with patch.object(
+        manager, "_get_supported_whispercpp_params", return_value=SUPPORTED - {"no_timestamps"}
+    ):
+        for _ in range(2):
+            assert (
+                manager._transcribe_with_whispercpp([b"\0\0" * 1600], mode="dictation") == "hello"
+            )
+    assert len(manager.model.calls) == 2
+    assert "no_timestamps" not in manager.model.calls[0]
+    assert manager.model.calls[0]["suppress_blank"] is False
+    assert (
+        sum("optional" in r.message and "no_timestamps" in r.message for r in caplog.records) == 1
+    )

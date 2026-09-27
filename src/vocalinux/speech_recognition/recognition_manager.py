@@ -1101,6 +1101,17 @@ class SpeechRecognitionManager:
                         "Cannot inspect pywhispercpp binding; verify its installation "
                         "before applying decoding settings"
                     )
+                # Older CUDA bindings omit this optional field. The model
+                # constructor already filters it; retain that compatibility
+                # for per-utterance updates, without weakening mode validation.
+                if "no_timestamps" not in supported:
+                    params.pop("no_timestamps")
+                    if not getattr(self, "_warned_missing_timestamps", False):
+                        logger.warning(
+                            "Skipping unsupported optional setting 'no_timestamps'; "
+                            "the binding's native timestamp behavior remains active"
+                        )
+                        self._warned_missing_timestamps = True
                 unsupported = params.keys() - supported
                 if unsupported:
                     raise ValueError(

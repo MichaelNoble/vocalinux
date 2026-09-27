@@ -181,3 +181,8 @@ word boundaries against editor context. Coding and terminal transformations keep
 their exact command spacing. Unsupported actions (`save`, `find`, `delete last
 word`, and `delete last sentence`, including their aliases) remain ordinary text
 until handlers are implemented; they no longer disappear without an action.
+
+Compatibility note: older native bindings may omit `no_timestamps`. As at model
+startup, this optional setting is omitted from transcription calls with a
+one-time warning; the binding's native timestamp behavior remains active. Mode
+parameters still require support and are never silently dropped.
