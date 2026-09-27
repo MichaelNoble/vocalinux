@@ -59,7 +59,7 @@ PARAMETERS AVAILABLE BUT NOT CURRENTLY USED
 ────────────────────────────────────────────
 
 n_threads : int  (default: 4)
-    CPU threads for the encoder. You are running on CUDA so this has
+    CPU threads for the encoder. You are running on CUDA so this hasA couple others that only do with the model, and forgetting the names of these parameters.
     minimal impact — GPU handles the heavy lifting.
 
 max_context : int  (default: -1, meaning use model default of 224 tokens)

@@ -171,7 +171,7 @@ def _get_supported_channels(audio, device_index: Optional[int] = None) -> int:
                 if "invalid number of channels" in error_str or "-9998" in error_str:
                     logger.debug(f"Device rejected {channels} channel(s) at {rate}Hz: {e}")
                 else:
-                    logger.debug(f"Channel test failed at {rate}Hz: {e}")
+                            logger.debug(f"Channel test failed at {rate}Hz: {e}")
                 continue
 
     logger.warning("Could not determine supported channel count, defaulting to 1")
