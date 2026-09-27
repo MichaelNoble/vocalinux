@@ -26,9 +26,9 @@ SUPPORTED = set(GLOBAL) | {"single_segment", "suppress_blank"}
 @pytest.mark.parametrize(
     "mode,temperature,prompt,blank,context",
     [
-        ("dictation", 0.1, None, False, False),
+        ("dictation", 0.1, None, False, True),
         ("clean", 0.0, None, True, True),
-        ("direct", 0.0, "", False, False),
+        ("direct", 0.0, "", False, True),
     ],
 )
 def test_resolve_mode_overrides_without_mutating_defaults(
@@ -94,7 +94,7 @@ def test_mode_roundtrip_uses_one_model_with_complete_resets(manager):
     assert coding["no_context"] is True
     assert direct["initial_prompt"] == ""
     assert direct["temperature"] == 0.0
-    assert direct["no_context"] is False
+    assert direct["no_context"] is True
     assert direct["no_timestamps"] is False
     assert direct["entropy_thold"] == 2.4
     assert direct["temperature_inc"] == -1.0
@@ -151,3 +151,14 @@ def test_optional_timestamps_missing_from_older_binding_still_transcribes(manage
     assert (
         sum("optional" in r.message and "no_timestamps" in r.message for r in caplog.records) == 1
     )
+
+
+def test_every_utterance_after_mode_switch_discards_decoder_history(manager):
+    # One model survives mode changes: even consecutive dictation/direct calls
+    # must not feed previous recognized text back into independent utterances.
+    modes = ["dictation", "dictation", "coding", "direct", "direct", "dictation"]
+    with patch.object(manager, "_get_supported_whispercpp_params", return_value=SUPPORTED):
+        for mode in modes:
+            manager._transcribe_with_whispercpp([b"\0\0" * 1600], mode=mode)
+    assert len(manager.model.calls) == len(modes)
+    assert all(call["no_context"] is True for call in manager.model.calls)

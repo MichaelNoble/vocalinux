@@ -3,8 +3,8 @@
 Saved advanced settings supply defaults; mode profiles override the five fields
 listed below. Decoder overrides persist in pywhispercpp, so callers must send
 all managed fields each time. These profiles do not select GPU backends or
-change the sampling strategy. Profile values are existing behavior, not claims
-that any particular decoding strategy has been benchmarked as best.
+change the sampling strategy. Each utterance discards past decoder output to
+prevent history feedback across independent recordings. Recognition quality still requires an audio trial.
 """
 
 import math
@@ -28,7 +28,7 @@ WHISPER_MODE_PARAMS: dict[str, dict] = {
         "single_segment": False,
         "suppress_blank": False,
         "temperature": 0.1,
-        "no_context": False,
+        "no_context": True,
     },
     "strict": {
         # Like clean but unambiguous command-only input — no prose expected.
@@ -43,12 +43,12 @@ WHISPER_MODE_PARAMS: dict[str, dict] = {
     },
     "direct": {
         # Minimal intervention — pass audio through with as little
-        # decoder bias as possible. No prompt, context allowed.
+        # decoder bias as possible. No prompt or previous-transcript history.
         "initial_prompt": "",
         "single_segment": False,
         "suppress_blank": False,
         "temperature": 0.0,
-        "no_context": False,
+        "no_context": True,
     },
     "coding": {
         "initial_prompt": (

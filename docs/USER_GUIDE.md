@@ -162,7 +162,10 @@ mode profile for each utterance. Profiles override `initial_prompt`,
 `single_segment`, `suppress_blank`, `temperature`, and `no_context`. Saved
 `no_timestamps`, `temperature_inc`, `entropy_thold`, `logprob_thold`, and
 `no_speech_thold` continue to apply in every mode. Switching modes explicitly
-resets managed values, including false values and empty prompts.
+resets managed values, including false values and empty prompts. All mode
+profiles use `no_context=True`: previous recognized text is not fed back into
+the next recording. This avoids accumulating recognition mistakes across
+utterances; editor context used for formatting is separate and unchanged.
 
 Direct mode leaves postprocessed text unchanged. Voice command recognition is
 controlled separately by the existing voice-command setting. Strict mode keeps
