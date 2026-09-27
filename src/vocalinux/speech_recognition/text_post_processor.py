@@ -24,6 +24,8 @@ class TextPostProcessor:
 
     _MODE_PIPELINE = {
         "raw": [],
+        "direct": [],
+        "strict": ["_normalize_whitespace", "_cleanup_punctuation", "_capitalize_sentences", "_handle_boundaries"],
         "dictation": ["_normalize_whitespace", "_soft_capitalize", "_handle_boundaries"],
         "clean": ["_normalize_whitespace", "_cleanup_punctuation", "_capitalize_sentences", "_handle_boundaries"],
         "terminal": ["_normalize_whitespace", "_cleanup_punctuation", "_handle_boundaries"],
@@ -31,6 +33,9 @@ class TextPostProcessor:
     }
 
     def process(self, text, mode="dictation", was_transformed=False):
+        if mode in {"direct", "raw"}:
+            return text
+
         logger.info(f"Initial: {text} | mode={mode}")
 
         context = get_context()

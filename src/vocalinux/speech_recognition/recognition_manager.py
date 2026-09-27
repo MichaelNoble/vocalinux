@@ -2016,30 +2016,31 @@ class SpeechRecognitionManager:
             logger.error(f"Unknown engine: {self.engine}")
             return
 
-        # Process text - either with voice commands or pass through directly
-            logger.debug(f"_process_audio_buffer got text='{text[:50] if text else '(empty)'}...'")
-        if text:
-            mode, consumed = self.mode_controller.handle(text)
+        if not text:
+            return
 
-            if consumed:
-                logger.info(f"[MODE] → {mode}")
-                return
+        mode, consumed = self.mode_controller.handle(text)
 
-            # Command processor runs first on raw transcription
-            if self._voice_commands_enabled:
-                processed_text, actions = self.command_processor.process_text(text)
-                was_transformed = processed_text != text
-            else:
-                processed_text = text
-                was_transformed = False
-                actions = []
+        if consumed:
+            logger.info(f"[MODE] → {mode}")
+            return
 
-            # Text processor always runs
-            processed_text = self.text_post_processor.process(
-                processed_text,
-                mode=self.mode_controller.mode,
-                was_transformed=was_transformed,
-            )
+        # Command processor runs first on raw transcription
+        if self._voice_commands_enabled:
+            processed_text, actions = self.command_processor.process_text(text)
+            was_transformed = processed_text != text
+        else:
+            processed_text = text
+            was_transformed = False
+            actions = []
+
+        # Text processor always runs
+        processed_text = self.text_post_processor.process(
+            processed_text,
+            mode=self.mode_controller.mode,
+            was_transformed=was_transformed,
+        )
+
 
 
         # Call text callbacks with processed text
