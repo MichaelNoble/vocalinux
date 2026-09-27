@@ -54,19 +54,16 @@ WHISPER_MODE_PARAMS: dict[str, dict] = {
         "initial_prompt": (
             # Case formatting — most common voice commands
             "camel case snake case pascal case upper snake case kebab case "
-    
             # JavaScript / React keywords and hooks
             "const let var function return async await import export default "
             "useState useEffect useRef useCallback useMemo useContext "
             "props state component render jsx fragment "
             "arrow function fat arrow double equals triple equals not equals "
-    
             # PHP keywords and operators
             "echo foreach foreach match namespace use trait interface "
             "public private protected static abstract extends implements "
             "dollar sign this arrow double colon null false true "
             "spaceship operator null coalescing Elvis operator "
-    
             # Shared / structural
             "class interface return if else elif switch case break continue "
             "open brace close brace open bracket close bracket "
@@ -84,22 +81,18 @@ WHISPER_MODE_PARAMS: dict[str, dict] = {
             "npm run start npm run build npm run dev npm install "
             "npm run test npx create react app node modules "
             "package dot json dot env "
-    
             # Composer / PHP tooling
             "composer install composer update composer require "
             "artisan migrate artisan serve php artisan "
-    
             # Git
             "git commit git push git pull git status git diff "
             "git checkout git branch git merge git stash git log "
             "git add dot git commit dash m "
-    
             # PHPStorm / general dev CLI
             "phpunit pest run dash dash filter dash dash coverage "
             "ssh sudo chmod chown mkdir rm dash rf ls dash la "
             "grep dash r pipe cat dot slash tilde backslash "
             "slash var slash www slash html "
-    
             # Symbols spoken as words
             "dash dash flag dot slash at sign percent ampersand."
         ),
@@ -136,8 +129,11 @@ def validate_decode_params(params: dict) -> None:
         elif isinstance(expected, str):
             valid = isinstance(value, str)
         else:
-            valid = (isinstance(value, (int, float)) and not isinstance(value, bool)
-                     and math.isfinite(value))
+            valid = (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+            )
         if not valid:
             raise ValueError(f"Invalid whisper.cpp setting '{key}'; check Advanced settings")
 

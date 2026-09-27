@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # Case / format transforms
 # ---------------------------------------------------------------------------
 
+
 def apply_case(words: list[str], fn: Callable[[list[str]], str]) -> str:
     """
     Clean words and apply a case transform function.
@@ -51,6 +52,7 @@ def apply_case(words: list[str], fn: Callable[[list[str]], str]) -> str:
 # ---------------------------------------------------------------------------
 # Processing steps (called in order by CommandProcessor.process_text)
 # ---------------------------------------------------------------------------
+
 
 def process_action_commands(
     text: str,
@@ -79,6 +81,8 @@ def process_action_commands(
             actions.append(cmds[cmd])
             text = re.sub(pattern, "", text)
 
+    if actions and re.fullmatch(r"[\s.,!?;:]*", text):
+        text = ""
     return text, actions
 
 
@@ -126,12 +130,12 @@ def process_multiword_format_commands(
         trigger = match.group(1).lower()
         fn = cmds[trigger]
 
-        after = remaining[match.end():].strip()
+        after = remaining[match.end() :].strip()
         next_trigger = trigger_regex.search(after)
 
         if next_trigger:
             words_to_format = after[: next_trigger.start()].strip().split()
-            remaining = after[next_trigger.start():]
+            remaining = after[next_trigger.start() :]
         else:
             words_to_format = after.split()
             remaining = ""
@@ -224,7 +228,6 @@ def clean_whitespace(text: str) -> str:
 
     - Collapses multiple spaces/tabs to a single space.
     - Removes stray space before sentence punctuation.
-    - Strips leading punctuation artifacts.
     - Strips leading/trailing spaces and tabs (not newlines).
 
     Args:
@@ -234,8 +237,8 @@ def clean_whitespace(text: str) -> str:
         Cleaned text.
     """
     text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r" ([.,!?;:])", r"\1", text)
-    text = re.sub(r"^[.,!?;:]+", "", text)
+    text = re.sub(r" ([.,!?;:)\]}])", r"\1", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
     # strip() would eat intentional leading/trailing newlines (e.g. "new line"
     # as a standalone command). Only strip spaces and tabs, not newlines.
     return text.strip(" \t")

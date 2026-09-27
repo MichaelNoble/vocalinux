@@ -426,7 +426,7 @@ def main():
             #     text_to_inject = " " + text_to_inject
             #     logger.debug("Added space separator before new segment")
             ##
-            
+
             success = text_system.inject_text(text)
             if success:
                 action_handler.set_last_injected_text(text)

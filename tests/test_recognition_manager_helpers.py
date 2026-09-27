@@ -39,9 +39,9 @@ from vocalinux.speech_recognition.recognition_manager import (
     _get_system_model_paths,
     _show_notification,
 )
-from vocalinux.speech_recognition.recognition_manager import (  # noqa: E402
+from vocalinux.speech_recognition.recognition_manager import (
     test_audio_input as _test_audio_input,
-)
+)  # noqa: E402
 
 # Restore immediately
 for _k, _v in _ORIG.items():

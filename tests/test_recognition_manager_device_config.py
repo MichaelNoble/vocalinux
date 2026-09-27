@@ -588,7 +588,12 @@ class TestTranscription(unittest.TestCase):
 
         from vocalinux.speech_recognition.whispercpp_config import DECODE_DEFAULTS
 
-        with patch.object(manager, "_get_supported_whispercpp_params", return_value=set(DECODE_DEFAULTS)), patch.dict("sys.modules", {"numpy": mock_np, "np": mock_np}):
+        with (
+            patch.object(
+                manager, "_get_supported_whispercpp_params", return_value=set(DECODE_DEFAULTS)
+            ),
+            patch.dict("sys.modules", {"numpy": mock_np, "np": mock_np}),
+        ):
             result = manager._transcribe_with_whispercpp(audio_buffer)
             assert result == "test result"
 

@@ -185,6 +185,7 @@ class TestMainModule(unittest.TestCase):
             "speech_recognition": {},
             "general": {"first_run": False},
         }
+        mock_config_instance.get_model_size_for_engine.return_value = "medium"
         mock_config_manager.return_value = mock_config_instance
 
         # Mock objects
@@ -632,6 +633,7 @@ class TestMainConfigPrecedence(unittest.TestCase):
             },
             "general": {"first_run": False},
         }
+        mock_config_instance.get_model_size_for_engine.return_value = "medium"
         mock_config_manager.return_value = mock_config_instance
 
         mock_speech_instance = MagicMock()

@@ -174,3 +174,10 @@ an explanatory log message instead of silently applying part of a profile.
 Debug logs show the effective non-content decoding settings. These diagnostic
 entries omit prompt text. Use the same model and recordings when comparing
 profiles; no profile is a guarantee of higher recognition accuracy.
+
+Stage-one command corrections preserve standalone punctuation and operators
+(including `!=` and `::`). In dictation/clean modes, spoken punctuation retains
+word boundaries against editor context. Coding and terminal transformations keep
+their exact command spacing. Unsupported actions (`save`, `find`, `delete last
+word`, and `delete last sentence`, including their aliases) remain ordinary text
+until handlers are implemented; they no longer disappear without an action.

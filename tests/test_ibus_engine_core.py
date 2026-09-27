@@ -314,7 +314,15 @@ class TestVocalinuxEngine(unittest.TestCase):
         sys.modules["gi.repository"].GObject = mock_gobject
         # Force reload the module so it picks up our mocks
         if "vocalinux.text_injection.ibus_engine" in sys.modules:
-            importlib.reload(sys.modules["vocalinux.text_injection.ibus_engine"])
+            module = sys.modules["vocalinux.text_injection.ibus_engine"]
+            # Keep the temporary paths installed by conftest across reloads.
+            paths = {
+                name: getattr(module, name)
+                for name in ("VOCALINUX_IBUS_DIR", "SOCKET_PATH", "PID_FILE")
+            }
+            importlib.reload(module)
+            for name, value in paths.items():
+                setattr(module, name, value)
 
     def tearDown(self):
         """Clean up after tests."""
@@ -588,7 +596,15 @@ class TestVocalinuxEngineApplication(unittest.TestCase):
         sys.modules["gi.repository"].GLib = mock_glib
         sys.modules["gi.repository"].GObject = mock_gobject
         if "vocalinux.text_injection.ibus_engine" in sys.modules:
-            importlib.reload(sys.modules["vocalinux.text_injection.ibus_engine"])
+            module = sys.modules["vocalinux.text_injection.ibus_engine"]
+            # Keep the temporary paths installed by conftest across reloads.
+            paths = {
+                name: getattr(module, name)
+                for name in ("VOCALINUX_IBUS_DIR", "SOCKET_PATH", "PID_FILE")
+            }
+            importlib.reload(module)
+            for name, value in paths.items():
+                setattr(module, name, value)
 
     def tearDown(self):
         """Clean up after tests."""

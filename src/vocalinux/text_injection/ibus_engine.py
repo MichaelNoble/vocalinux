@@ -705,12 +705,14 @@ class VocalinuxEngine(IBus.Engine if IBUS_AVAILABLE else object):
                                     # Reset the flag now that caller has read it
                                     VocalinuxEngine._context_changed = False
 
-                                    payload = json.dumps({
-                                        "surrounding_text": surrounding,
-                                        "last_surrounding_text": last_surrounding,
-                                        "cursor_pos": cursor_pos,
-                                        "context_changed": context_changed,
-                                    })
+                                    payload = json.dumps(
+                                        {
+                                            "surrounding_text": surrounding,
+                                            "last_surrounding_text": last_surrounding,
+                                            "cursor_pos": cursor_pos,
+                                            "context_changed": context_changed,
+                                        }
+                                    )
                                     conn.sendall(payload.encode("utf-8"))
                                     continue
 
@@ -1086,6 +1088,7 @@ class IBusTextInjector:
                 return False
 
         return False
+
 
 def _get_engines_xml() -> str:
     """Return engine XML for IBus --xml discovery.

@@ -20,8 +20,8 @@ from ..ui.audio_feedback import play_error_sound, play_start_sound, play_stop_so
 from ..utils.vosk_model_info import VOSK_MODEL_INFO
 from ..utils.whispercpp_model_info import WHISPERCPP_MODEL_INFO, get_model_path, is_model_downloaded
 from .command_processor import CommandProcessor
-from .text_post_processor import TextPostProcessor
 from .mode_controller import ModeController
+from .text_post_processor import TextPostProcessor
 from .whispercpp_config import DECODE_DEFAULTS, resolve_decode_params, validate_decode_params
 
 
@@ -171,7 +171,7 @@ def _get_supported_channels(audio, device_index: Optional[int] = None) -> int:
                 if "invalid number of channels" in error_str or "-9998" in error_str:
                     logger.debug(f"Device rejected {channels} channel(s) at {rate}Hz: {e}")
                 else:
-                            logger.debug(f"Channel test failed at {rate}Hz: {e}")
+                    logger.debug(f"Channel test failed at {rate}Hz: {e}")
                 continue
 
     logger.warning("Could not determine supported channel count, defaulting to 1")
@@ -1025,14 +1025,14 @@ class SpeechRecognitionManager:
         return cpu_backend
 
     def _transcribe_with_whispercpp(
-            self,
-            audio_buffer: list[bytes],
-            initial_prompt: str = "",
-            single_segment: bool = True,
-            suppress_blank=True,
-            temperature: float = 0.0,
-            no_context: bool = True,
-            mode: Optional[str] = None,
+        self,
+        audio_buffer: list[bytes],
+        initial_prompt: str = "",
+        single_segment: bool = True,
+        suppress_blank=True,
+        temperature: float = 0.0,
+        no_context: bool = True,
+        mode: Optional[str] = None,
     ) -> str:
         """Transcribe PCM audio with complete decoder settings.
 
@@ -2020,9 +2020,7 @@ class SpeechRecognitionManager:
             text = self._transcribe_with_whisper(audio_buffer)
 
         elif self.engine == "whisper_cpp":
-            text = self._transcribe_with_whispercpp(
-                audio_buffer, mode=self.mode_controller.mode
-            )
+            text = self._transcribe_with_whispercpp(audio_buffer, mode=self.mode_controller.mode)
 
         else:
             logger.error(f"Unknown engine: {self.engine}")
@@ -2052,8 +2050,6 @@ class SpeechRecognitionManager:
             mode=self.mode_controller.mode,
             was_transformed=was_transformed,
         )
-
-
 
         # Call text callbacks with processed text
         logger.debug(

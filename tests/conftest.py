@@ -195,3 +195,16 @@ def mock_audio_player():
 
 # This will help pytest discover all test files correctly
 pytest_plugins = []
+
+
+@pytest.fixture(autouse=True)
+def _isolate_ibus_runtime_files(tmp_path, monkeypatch):
+    """Never touch the user's live engine socket, PID file, or permissions."""
+    from vocalinux.speech_recognition import context_manager
+    from vocalinux.text_injection import ibus_engine
+
+    directory = tmp_path / "ibus"
+    monkeypatch.setattr(ibus_engine, "VOCALINUX_IBUS_DIR", directory)
+    monkeypatch.setattr(ibus_engine, "SOCKET_PATH", directory / "inject.sock")
+    monkeypatch.setattr(ibus_engine, "PID_FILE", directory / "engine.pid")
+    monkeypatch.setattr(context_manager, "_SOCKET_PATH", directory / "inject.sock")

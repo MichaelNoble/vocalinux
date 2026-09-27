@@ -62,6 +62,7 @@ class CommandProcessor:
         on each process_text() call — we build them here to avoid
         recompiling on every utterance.
         """
+
         def _make_pattern(keys: list[str]) -> re.Pattern:
             """Word-boundary pattern, longest key first to avoid prefix shadowing."""
             sorted_keys = sorted(keys, key=len, reverse=True)
@@ -72,9 +73,9 @@ class CommandProcessor:
 
         # These compiled patterns are available for any caller that wants
         # to pre-screen text cheaply before calling process_text().
-        self.text_cmd_pattern      = _make_pattern(list(TEXT_COMMANDS.keys()))
-        self.action_cmd_pattern    = _make_pattern(list(ACTION_COMMANDS.keys()))
-        self.format_mod_pattern    = _make_pattern(list(FORMAT_MODIFIERS.keys()))
+        self.text_cmd_pattern = _make_pattern(list(TEXT_COMMANDS.keys()))
+        self.action_cmd_pattern = _make_pattern(list(ACTION_COMMANDS.keys()))
+        self.format_mod_pattern = _make_pattern(list(FORMAT_MODIFIERS.keys()))
         self.multiword_fmt_pattern = _make_pattern(list(MULTIWORD_FORMAT_COMMANDS.keys()))
 
     # ------------------------------------------------------------------
@@ -112,6 +113,9 @@ class CommandProcessor:
             return "", []
 
         logger.debug("Processing commands in: %r", text)
+
+        # Normalize spoken spacing before matching multiword command phrases.
+        text = re.sub(r"[ \t]+", " ", text)
 
         # Step 1 — action commands (consume from text, accumulate action ids)
         text, actions = process_action_commands(text)

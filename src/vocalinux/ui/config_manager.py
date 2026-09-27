@@ -158,7 +158,9 @@ class ConfigManager:
             sr_config["whisper_cpp_model_size"] = (
                 current_model if current_engine == "whisper_cpp" else "tiny"
             )
-            logger.info(f"Migrated whisper_cpp_model_size to: {sr_config['whisper_cpp_model_size']}")
+            logger.info(
+                f"Migrated whisper_cpp_model_size to: {sr_config['whisper_cpp_model_size']}"
+            )
 
         self.save_config()
         logger.info("Config migrated to new per-engine model format")

@@ -19,15 +19,26 @@ class TextPostProcessor:
         self.chars_before = ""
         self.chars_after = ""
         self.context_changed = True
+        self.preserve_command_spacing = False
         self.surrounding = ""
         self.cursor_pos = 0
 
     _MODE_PIPELINE = {
         "raw": [],
         "direct": [],
-        "strict": ["_normalize_whitespace", "_cleanup_punctuation", "_capitalize_sentences", "_handle_boundaries"],
+        "strict": [
+            "_normalize_whitespace",
+            "_cleanup_punctuation",
+            "_capitalize_sentences",
+            "_handle_boundaries",
+        ],
         "dictation": ["_normalize_whitespace", "_soft_capitalize", "_handle_boundaries"],
-        "clean": ["_normalize_whitespace", "_cleanup_punctuation", "_capitalize_sentences", "_handle_boundaries"],
+        "clean": [
+            "_normalize_whitespace",
+            "_cleanup_punctuation",
+            "_capitalize_sentences",
+            "_handle_boundaries",
+        ],
         "terminal": ["_normalize_whitespace", "_cleanup_punctuation", "_handle_boundaries"],
         "coding": ["_normalize_whitespace", "_cleanup_punctuation", "_handle_boundaries"],
     }
@@ -43,10 +54,11 @@ class TextPostProcessor:
         self.surrounding = context["surrounding_text"]
         self.context_changed = context["context_changed"]
         self.was_transformed = was_transformed
+        self.preserve_command_spacing = was_transformed and mode in {"coding", "terminal"}
 
         if self.surrounding:
-            self.chars_before = self.surrounding[max(0, self.cursor_pos - 3):self.cursor_pos]
-            self.chars_after = self.surrounding[self.cursor_pos:self.cursor_pos + 3]
+            self.chars_before = self.surrounding[max(0, self.cursor_pos - 3) : self.cursor_pos]
+            self.chars_after = self.surrounding[self.cursor_pos : self.cursor_pos + 3]
         else:
             self.chars_before = ""
             self.chars_after = ""
@@ -57,7 +69,7 @@ class TextPostProcessor:
         )
 
         for step_name in self._MODE_PIPELINE.get(mode, self._MODE_PIPELINE["clean"]):
-            text = text.lstrip(" \t")   # not \n
+            text = text.lstrip(" \t")  # not \n
             text = getattr(self, step_name)(text)
 
         self.last_text = text
@@ -88,7 +100,7 @@ class TextPostProcessor:
 
         # If chunk starts with punctuation, avoid leading space later
         if text and text[0] in ".,!?":
-            text = text.lstrip()
+            text = text.lstrip(" ")
 
         return text
 
@@ -135,7 +147,7 @@ class TextPostProcessor:
         last_char = source[-1] if source else ""
         last_chars = source[-3:] if len(source) >= 3 else source
 
-        ellipsis_ending = (last_char == "…" or last_chars == "...")
+        ellipsis_ending = last_char == "…" or last_chars == "..."
 
         if ellipsis_ending:
             return text[0].lower() + text[1:]
@@ -144,11 +156,7 @@ class TextPostProcessor:
         if last_char in terminal_punctuation and self.chars_after:
             return text[0].lower() + text[1:]
 
-        should_capitalize = (
-            not source
-            or last_char in terminal_punctuation
-            or last_char == "\n"
-        )
+        should_capitalize = not source or last_char in terminal_punctuation or last_char == "\n"
 
         if should_capitalize:
             return text[0].upper() + text[1:]
@@ -186,7 +194,7 @@ class TextPostProcessor:
 
         text = text.lstrip()  # avoid double spaces
 
-                # Context has changed — we're in a new field or app.
+        # Context has changed — we're in a new field or app.
         # Don't prepend a space; we have no reliable information
         # about what precedes the cursor.
         # Only block on context_changed if we have no cursor information.
@@ -231,14 +239,16 @@ class TextPostProcessor:
             return text
 
         # Otherwise insert a space between existing text and new chunk
-        logger.debug(f"_handle_left_boundary: prepending space (chars_before='{self.chars_before}')")
+        logger.debug(
+            f"_handle_left_boundary: prepending space (chars_before='{self.chars_before}')"
+        )
         return " " + text
 
     def _handle_boundaries(self, text: str) -> str:
         if not text:
             return ""
-        if self.was_transformed:
-            return text  # trust the command processor output entirely
+        if self.preserve_command_spacing:
+            return text  # identifier/shell transformations retain exact spacing
 
         text = text.lstrip(" \t")
 
@@ -262,6 +272,9 @@ class TextPostProcessor:
 
         # If already clean boundary (space on both sides), do nothing
         if before.endswith(" ") and after.startswith(" "):
+            prepend_space = False
+
+        elif text.startswith(tuple(".,!?;:)]}")):
             prepend_space = False
 
         elif not before:
@@ -288,21 +301,18 @@ class TextPostProcessor:
         append_space = False
 
         if after:
-            if (
-                    not after.startswith((" ", "\n"))  # no space ahead
-                    and not text.endswith((" ", "\n"))  # no space already
-            ):
+            if not after.startswith((" ", "\n")) and not text.endswith(  # no space ahead
+                (" ", "\n")
+            ):  # no space already
                 last_char = text[-1]
 
-                is_word_boundary = (
-                        prev_char == " "
-                        or (after and after[0] == " ")
-                )
+                is_word_boundary = prev_char == " " or (after and after[0] == " ")
 
                 is_mid_sentence = (
-                        last_char in ".!?"
-                        and next_char.islower()
-                        and not is_word_boundary
+                    last_char in ".!?"
+                    and next_char.islower()
+                    and not is_word_boundary
+                    and not self.was_transformed
                 )
 
                 if is_mid_sentence:
@@ -331,10 +341,10 @@ class TextPostProcessor:
 
         # Respect existing surrounding spaces (prevents accumulation)
         if after.startswith(" "):
-            text = text.rstrip()
+            text = text.rstrip(" ")
 
         if before.endswith(" "):
-            text = text.lstrip()
+            text = text.lstrip(" ")
 
         logger.debug(
             f"_handle_boundaries: prepend={prepend_space} append={append_space} "

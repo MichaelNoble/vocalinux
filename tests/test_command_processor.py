@@ -16,35 +16,21 @@ class TestCommandProcessor(unittest.TestCase):
         self.processor = CommandProcessor()
 
     def test_initialization(self):
-        """Test initialization of command processor."""
-        # Verify command dictionaries are initialized
-        self.assertTrue(hasattr(self.processor, "text_commands"))
-        self.assertTrue(hasattr(self.processor, "action_commands"))
-        self.assertTrue(hasattr(self.processor, "format_commands"))
-
-        # Verify dictionaries have expected entries
-        self.assertIn("new line", self.processor.text_commands)
-        self.assertIn("period", self.processor.text_commands)
-        self.assertIn("delete that", self.processor.action_commands)
-        self.assertIn("capitalize", self.processor.format_commands)
-
-        # Verify regex patterns are compiled
-        self.assertTrue(hasattr(self.processor, "text_cmd_regex"))
-        self.assertTrue(hasattr(self.processor, "action_cmd_regex"))
-        self.assertTrue(hasattr(self.processor, "format_cmd_regex"))
+        self.assertTrue(self.processor.has_any_command("new line"))
+        self.assertFalse(self.processor.has_any_command("ordinary prose"))
 
     def test_text_command_processing(self):
         """Test processing of text commands."""
         # Test common text commands
         test_cases = [
             ("new line", "\n", []),
-            ("this is a new paragraph", "this is a \n\n", []),
+            ("this is a new paragraph", "this is a\n\n", []),
             ("end of sentence period", "end of sentence.", []),
             ("add a comma here", "add a, here", []),
             ("use question mark", "use?", []),
             ("exclamation mark test", "! test", []),
             ("semicolon example", "; example", []),
-            ("testing colon usage", "testing:", []),
+            ("testing colon usage", "testing: usage", []),
             ("dash separator", "- separator", []),
             ("hyphen example", "- example", []),
             ("underscore value", "_ value", []),
@@ -67,7 +53,7 @@ class TestCommandProcessor(unittest.TestCase):
             ("delete that", "", ["delete_last"]),
             ("scratch that previous text", "previous text", ["delete_last"]),
             ("undo my last change", "my last change", ["undo"]),
-            ("redo that edit", "that edit", ["redo"]),
+            ("redo that edit", "edit", ["redo"]),
             ("select all text", "text", ["select_all"]),
             ("select line of code", "of code", ["select_line"]),
             ("select word here", "here", ["select_word"]),
@@ -78,7 +64,7 @@ class TestCommandProcessor(unittest.TestCase):
             # Test multiple actions
             ("select all then copy", "then", ["select_all", "copy"]),
             # Test action with text before command (should add space)
-            ("hello select all world", " world", ["select_all"]),
+            ("hello select all world", "hello world", ["select_all"]),
         ]
 
         for input_text, expected_output, expected_actions in test_cases:
@@ -107,11 +93,11 @@ class TestCommandProcessor(unittest.TestCase):
         """Test combinations of different command types."""
         test_cases = [
             # Text + Action
-            ("new line then delete that", "", ["delete_last"]),
+            ("new line then delete that", "\n then", ["delete_last"]),
             # Format + Text
             ("capitalize name period", "Name.", []),
             # Action + Format
-            ("select all then capitalize text", " then Text", ["select_all"]),
+            ("select all then capitalize text", "then Text", ["select_all"]),
             # Complex combination
             (
                 "capitalize name comma new line select paragraph",
@@ -187,7 +173,7 @@ class TestCommandProcessor(unittest.TestCase):
         self.assertEqual(result, "")
 
         # The active_formats should be cleared even if no word was formatted
-        self.assertEqual(self.processor.active_formats, set())
+        self.assertEqual(self.processor.process_text("ordinary text"), ("ordinary text", []))
 
     def test_whitespace_handling(self):
         """Test handling of whitespace in command processing."""
@@ -201,36 +187,23 @@ class TestCommandProcessor(unittest.TestCase):
 
         # Test with mixed whitespace
         result, _ = self.processor.process_text(" capitalize  word  new   line ")
-        self.assertEqual(result, "Word \n")
+        self.assertEqual(result, "Word\n")
 
     def test_regex_compilation(self):
-        """Test the regex pattern compilation."""
-        self.processor._compile_patterns()
-
-        # Test regex patterns match correctly
-        self.assertTrue(self.processor.text_cmd_regex.search("new line"))
-        self.assertTrue(self.processor.text_cmd_regex.search("this is a period"))
-        self.assertTrue(self.processor.action_cmd_regex.search("delete that"))
-        self.assertTrue(self.processor.format_cmd_regex.search("capitalize this"))
-
-        # Test non-matches
-        self.assertFalse(self.processor.text_cmd_regex.search("newline"))  # no space
-        self.assertFalse(self.processor.action_cmd_regex.search("deletion"))  # not a command
+        for phrase in ("new line", "this is a period", "delete that", "capitalize this"):
+            self.assertTrue(self.processor.has_any_command(phrase))
+        for phrase in ("newline", "deletion"):
+            self.assertFalse(self.processor.has_any_command(phrase))
 
     def test_compile_patterns_method(self):
-        """Test the _compile_patterns method directly."""
-        # Add a new command to test recompilation
-        self.processor.text_commands["test command"] = "TEST"
+        from unittest.mock import patch
 
-        # Recompile patterns
-        self.processor._compile_patterns()
+        from vocalinux.speech_recognition.command_definitions import TEXT_COMMANDS
 
-        # Verify new command is in the pattern
-        self.assertTrue(self.processor.text_cmd_regex.search("test command"))
-
-
-class TestCommandProcessorFallback(unittest.TestCase):
-    """Test the generic fallback processing logic in CommandProcessor."""
+        with patch.dict(TEXT_COMMANDS, {"test command": "TEST"}):
+            self.processor._compile_patterns()
+            self.assertTrue(self.processor.has_any_command("test command"))
+            self.assertEqual(self.processor.process_text("test command"), ("TEST", []))
 
     def setUp(self):
         """Set up for tests."""
@@ -315,14 +288,7 @@ class TestCommandProcessorFallback(unittest.TestCase):
         self.assertIn("!", result)
 
     def test_generic_unknown_format_type(self):
-        """Test unknown format type falls back to word as-is."""
-        # Add an unknown format type for testing
-        self.processor.format_commands["testformat"] = "unknown_type"
-        self.processor._compile_patterns()
-
-        result, actions = self.processor.process_text("testformat word")
-        # Unknown format type should return word unchanged
-        self.assertIn("word", result.lower())
+        self.assertEqual(self.processor.process_text("testformat word"), ("testformat word", []))
 
     def test_generic_select_line_action(self):
         """Test select line action through generic path."""

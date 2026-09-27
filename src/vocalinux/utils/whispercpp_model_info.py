@@ -51,7 +51,7 @@ WHISPERCPP_MODEL_INFO = {
         "params": "756M",
         "desc": "Distil-Large v3.5 — fast, English-only, optimized for short-form/commands",
         "url": "https://huggingface.co/distil-whisper/distil-large-v3.5-ggml/resolve/main/ggml-model.bin",
-},
+    },
 }
 
 # Available models list
