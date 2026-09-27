@@ -338,7 +338,7 @@ def main():
         model_size = args.model
         logger.info(f"Using model={model_size} (from command line)")
     else:
-        model_size = saved_settings.get("model_size", args.model)
+        model_size = config_manager.get_model_size_for_engine(engine)
         logger.info(f"Using model={model_size} (from saved config)")
 
     vad_sensitivity = saved_settings.get("vad_sensitivity", 3)
