@@ -1495,6 +1495,13 @@ class SettingsDialog(Gtk.Dialog):
 
         controls_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
 
+        note = Gtk.Label(
+            label="Mode profiles override prompt, temperature, and context settings during dictation."
+        )
+        note.set_line_wrap(True)
+        note.set_xalign(0)
+        controls_box.pack_start(note, False, False, 0)
+
         group = PreferencesGroup(title="Whisper.cpp Decoding")
 
         self.advanced_no_timestamps_switch = Gtk.Switch()

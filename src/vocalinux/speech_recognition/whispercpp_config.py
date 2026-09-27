@@ -1,94 +1,13 @@
+"""Per-utterance whisper.cpp decoder profiles.
+
+Saved advanced settings supply defaults; mode profiles override the five fields
+listed below. Decoder overrides persist in pywhispercpp, so callers must send
+all managed fields each time. These profiles do not select GPU backends or
+change the sampling strategy. Profile values are existing behavior, not claims
+that any particular decoding strategy has been benchmarked as best.
 """
-Whisper.cpp per-mode inference parameters for Vocalinux.
 
-Each mode gets its own parameter set passed directly to model.transcribe()
-on every utterance — no model reload required, parameters are decoder-level.
-
-PARAMETER REFERENCE
-───────────────────
-
-initial_prompt : str
-    Text prepended to the decoder's context before transcription begins.
-    Whisper treats this as prior conversation history, which biases the
-    vocabulary and phrasing of the output toward words that appear in the
-    prompt. For command recognition, listing the exact trigger phrases here
-    (e.g. "camel case", "snake case") significantly improves the chance
-    Whisper produces those exact words rather than phonetic near-misses like
-    "a scalp case" or "Pascal K". For dictation, a natural-language prompt
-    biases toward sentence structure and punctuation.
-
-single_segment : bool
-    When True, forces the entire audio clip into one output segment.
-    Whisper normally splits longer audio into multiple segments, adding its
-    own punctuation and capitalization at each boundary — which interferes
-    with command parsing. For short discrete utterances (commands, code),
-    True gives cleaner, flatter output. For dictation over longer pauses,
-    False allows natural segmentation.
-
-suppress_non_speech_tokens : bool
-    When True, suppresses special tokens Whisper uses to inject filler
-    words, laughter, music markers, etc. ([MUSIC], [LAUGHTER], (applause)).
-    Useful for command and code modes where these would corrupt output.
-    In dictation mode, leaving this False lets Whisper handle ambient
-    speech more naturally without aggressively filtering.
-
-temperature : float
-    Controls decoder randomness. 0.0 is fully deterministic — the highest
-    probability token is always chosen, giving consistent repeatable output.
-    Ideal for commands where you want exact phrase recognition every time.
-    A small value like 0.1 introduces slight variation which can help
-    dictation avoid repetition loops on longer audio. Do not go above 0.2
-    for voice input — higher values produce hallucinations.
-
-no_context : bool
-    When True, the decoder ignores any cached context from previous
-    segments. For commands this is correct — each utterance is independent
-    and prior context can actively hurt recognition by biasing the decoder
-    toward continuing a sentence rather than recognizing a fresh command.
-    For dictation, False allows Whisper to use the tail of the previous
-    segment as context, improving coherence across utterances.
-
-beam_size: int
-    default is 1 (greedy). Beam search considers multiple candidate sequences and picks the best.
-    Costs more compute but improves accuracy on
-    ambiguous phrases like "pascal case". On your
-    GPU the latency hit should be small.
-
-
-PARAMETERS AVAILABLE BUT NOT CURRENTLY USED
-────────────────────────────────────────────
-
-n_threads : int  (default: 4)
-    CPU threads for the encoder. You are running on CUDA so this hasA couple others that only do with the model, and forgetting the names of these parameters.
-    minimal impact — GPU handles the heavy lifting.
-
-max_context : int  (default: -1, meaning use model default of 224 tokens)
-    Maximum tokens of prior context carried into the decoder. Only
-    relevant when no_context=False. Could be tuned for dictation mode
-    to limit how far back Whisper looks, preventing old context from
-    corrupting new segments.
-
-word_thold : float  (default: 0.01)
-    Confidence threshold below which a word-level timestamp is suppressed.
-    Only relevant if you use word-level timestamps — not currently used.
-
-max_len : int  (default: 0, no limit)
-    Maximum segment length in characters. Could enforce short output in
-    command mode as a safety net, but single_segment=True already
-    handles this adequately.
-
-token_timestamps : bool  (default: False)
-    Enables per-token timestamp output. Not needed unless you want to
-    implement cursor-position-aware editing in the future.
-
-dtw : bool  (default: False — confirmed off in your model load output)
-    Dynamic time warping for improved timestamp alignment. Disabled in
-    your build, not relevant to transcription quality.
-
-split_on_word : bool  (default: False)
-    Splits segments on word boundaries rather than token boundaries.
-    Only meaningful if max_len is set.
-"""
+import math
 
 WHISPER_MODE_PARAMS: dict[str, dict] = {
     "clean": {
@@ -190,3 +109,44 @@ WHISPER_MODE_PARAMS: dict[str, dict] = {
         "no_context": True,
     },
 }
+
+DECODE_DEFAULTS = {
+    "no_timestamps": True,
+    "no_context": True,
+    "initial_prompt": "",
+    "single_segment": True,
+    "suppress_blank": True,
+    "temperature": 0.0,
+    "temperature_inc": -1.0,
+    "entropy_thold": 2.4,
+    "logprob_thold": -1.0,
+    "no_speech_thold": 0.6,
+}
+
+
+def validate_decode_params(params: dict) -> None:
+    """Reject malformed managed values before the binding mutates its params."""
+    unknown = params.keys() - DECODE_DEFAULTS.keys()
+    if unknown:
+        raise ValueError(f"Unknown whisper.cpp decoding parameters: {sorted(unknown)}")
+    for key, value in params.items():
+        expected = DECODE_DEFAULTS[key]
+        if isinstance(expected, bool):
+            valid = isinstance(value, bool)
+        elif isinstance(expected, str):
+            valid = isinstance(value, str)
+        else:
+            valid = (isinstance(value, (int, float)) and not isinstance(value, bool)
+                     and math.isfinite(value))
+        if not valid:
+            raise ValueError(f"Invalid whisper.cpp setting '{key}'; check Advanced settings")
+
+
+def resolve_decode_params(global_params: dict, mode: str) -> dict:
+    """Return complete validated defaults with explicit per-mode overrides."""
+    if mode not in WHISPER_MODE_PARAMS:
+        raise ValueError(f"Unknown dictation mode: {mode}")
+    validate_decode_params(global_params)
+    params = {**DECODE_DEFAULTS, **global_params, **WHISPER_MODE_PARAMS[mode]}
+    validate_decode_params(params)
+    return params
