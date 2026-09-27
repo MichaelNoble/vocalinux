@@ -33,15 +33,15 @@ if "gi" not in sys.modules:
 if "gi.repository" not in sys.modules:
     sys.modules["gi.repository"] = MagicMock()
 
+from vocalinux.speech_recognition import recognition_manager as _recognition  # noqa: E402
 from vocalinux.speech_recognition.recognition_manager import (
     SpeechRecognitionManager,
     _filter_non_speech,
     _get_system_model_paths,
     _show_notification,
 )
-from vocalinux.speech_recognition.recognition_manager import (
-    test_audio_input as _test_audio_input,
-)  # noqa: E402
+
+_test_audio_input = _recognition.test_audio_input
 
 # Restore immediately
 for _k, _v in _ORIG.items():
