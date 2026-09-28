@@ -1,5 +1,6 @@
 import re
 
+
 class ModeController:
     def __init__(self):
         self.mode = "clean"

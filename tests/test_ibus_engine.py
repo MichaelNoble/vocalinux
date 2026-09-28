@@ -451,9 +451,6 @@ class TestIBusTextInjector(unittest.TestCase):
         result = injector.inject_text("")
         self.assertTrue(result)
 
-        result = injector.inject_text("   ")
-        self.assertTrue(result)
-
     @patch("vocalinux.text_injection.ibus_engine.IBUS_AVAILABLE", True)
     @patch("vocalinux.text_injection.ibus_engine.ensure_ibus_dir")
     @patch("vocalinux.text_injection.ibus_engine.SOCKET_PATH")

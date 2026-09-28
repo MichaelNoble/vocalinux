@@ -20,9 +20,9 @@ from ..ui.audio_feedback import play_error_sound, play_start_sound, play_stop_so
 from ..utils.vosk_model_info import VOSK_MODEL_INFO
 from ..utils.whispercpp_model_info import WHISPERCPP_MODEL_INFO, get_model_path, is_model_downloaded
 from .command_processor import CommandProcessor
-from .text_post_processor import TextPostProcessor
 from .mode_controller import ModeController
-
+from .text_post_processor import TextPostProcessor
+from .whispercpp_config import DECODE_DEFAULTS, resolve_decode_params, validate_decode_params
 
 
 # ALSA error handler to suppress warnings during PyAudio initialization
@@ -536,9 +536,9 @@ class SpeechRecognitionManager:
         self.recognition_thread = None
         self.model = None
         self.recognizer = None  # Added for VOSK
+        self.mode_controller = ModeController()
         self.command_processor = CommandProcessor()
         self.text_post_processor = TextPostProcessor()
-        self.mode_controller = ModeController()
 
         # Voice commands: None=auto (VOSK=yes, Whisper=no), True=always on, False=always off
         self._voice_commands_preference = kwargs.get("voice_commands_enabled")
@@ -1024,15 +1024,22 @@ class SpeechRecognitionManager:
         logger.info("Successfully loaded model with CPU backend")
         return cpu_backend
 
-    def _transcribe_with_whispercpp(self, audio_buffer: list[bytes]) -> str:
-        """
-        Transcribe audio buffer using whisper.cpp.
+    def _transcribe_with_whispercpp(
+        self,
+        audio_buffer: list[bytes],
+        initial_prompt: str = "",
+        single_segment: bool = True,
+        suppress_blank=True,
+        temperature: float = 0.0,
+        no_context: bool = True,
+        mode: Optional[str] = None,
+    ) -> str:
+        """Transcribe PCM audio with complete decoder settings.
 
-        Args:
-            audio_buffer: List of audio data chunks (16-bit PCM at 16kHz)
-
-        Returns:
-            Transcribed text
+        A mode selects its profile over saved defaults. Without a mode, the
+        explicit legacy keyword arguments remain supported. Empty prompts are
+        passed as strings: the installed binding rejects None for this field.
+        Backend selection and sampling strategy are unchanged.
         """
         import time
 
@@ -1072,10 +1079,52 @@ class SpeechRecognitionManager:
                     logger.warning("Model is None during transcription, returning empty result")
                     return ""
 
-                # Transcribe with whisper.cpp
-                # pywhispercpp expects audio as numpy array
+                globals_ = {
+                    key: getattr(self, f"whispercpp_{key}", value)
+                    for key, value in DECODE_DEFAULTS.items()
+                }
+                if mode is not None:
+                    params = resolve_decode_params(globals_, mode)
+                else:
+                    params = {
+                        **globals_,
+                        "initial_prompt": initial_prompt,
+                        "single_segment": single_segment,
+                        "suppress_blank": suppress_blank,
+                        "temperature": temperature,
+                        "no_context": no_context,
+                    }
+                    validate_decode_params(params)
+                supported = self._get_supported_whispercpp_params()
+                if supported is None:
+                    raise ValueError(
+                        "Cannot inspect pywhispercpp binding; verify its installation "
+                        "before applying decoding settings"
+                    )
+                # Older CUDA bindings omit this optional field. The model
+                # constructor already filters it; retain that compatibility
+                # for per-utterance updates, without weakening mode validation.
+                if "no_timestamps" not in supported:
+                    params.pop("no_timestamps")
+                    if not getattr(self, "_warned_missing_timestamps", False):
+                        logger.warning(
+                            "Skipping unsupported optional setting 'no_timestamps'; "
+                            "the binding's native timestamp behavior remains active"
+                        )
+                        self._warned_missing_timestamps = True
+                unsupported = params.keys() - supported
+                if unsupported:
+                    raise ValueError(
+                        f"pywhispercpp does not support decoding settings: {sorted(unsupported)}; "
+                        "use a compatible binding before transcribing"
+                    )
+                logger.debug(
+                    "whisper.cpp mode=%s effective parameters=%s",
+                    mode or "explicit",
+                    {key: value for key, value in params.items() if key != "initial_prompt"},
+                )
                 transcribe_start = time.time()
-                segments = self.model.transcribe(audio_float, language=lang)
+                segments = self.model.transcribe(audio_float, language=lang, **params)
                 transcribe_duration = time.time() - transcribe_start
 
             # Extract text from segments, filtering non-speech tokens
@@ -1982,32 +2031,36 @@ class SpeechRecognitionManager:
             text = self._transcribe_with_whisper(audio_buffer)
 
         elif self.engine == "whisper_cpp":
-            text = self._transcribe_with_whispercpp(audio_buffer)
+            text = self._transcribe_with_whispercpp(audio_buffer, mode=self.mode_controller.mode)
 
         else:
             logger.error(f"Unknown engine: {self.engine}")
             return
 
-        # Process text - either with voice commands or pass through directly
-            logger.debug(f"_process_audio_buffer got text='{text[:50] if text else '(empty)'}...'")
-        if text:
-            mode, consumed = self.mode_controller.handle(text)
-            if consumed:
-                logger.info(f"[MODE] → {mode}")
-                return
+        if not text:
+            return
 
-            processed_text = self.text_post_processor.process(
-                text,
-                mode=self.mode_controller.mode
-            )
+        mode, consumed = self.mode_controller.handle(text)
 
-            # Optional command processing
-            if self._voice_commands_enabled:
-                processed_text, actions = self.command_processor.process_text(processed_text)
-            else:
-                # Voice commands disabled - pass text through directly (Whisper handles punctuation)
-                processed_text = text.strip()
-                actions = []
+        if consumed:
+            logger.info(f"[MODE] → {mode}")
+            return
+
+        # Command processor runs first on raw transcription
+        if self._voice_commands_enabled:
+            processed_text, actions = self.command_processor.process_text(text)
+            was_transformed = processed_text != text
+        else:
+            processed_text = text
+            was_transformed = False
+            actions = []
+
+        # Text processor always runs
+        processed_text = self.text_post_processor.process(
+            processed_text,
+            mode=self.mode_controller.mode,
+            was_transformed=was_transformed,
+        )
 
         # Call text callbacks with processed text
         logger.debug(

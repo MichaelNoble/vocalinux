@@ -71,6 +71,7 @@ ENGINE_MODELS = {
         "small",
         "medium",
         "large",
+        "distil-large",
     ],  # whisper.cpp models (ggml format)
 }
 
@@ -81,6 +82,11 @@ WHISPER_MODEL_INFO = {
     "small": {"size_mb": 466, "desc": "Balanced speed/accuracy", "params": "244M"},
     "medium": {"size_mb": 1500, "desc": "High accuracy, slower", "params": "769M"},
     "large": {"size_mb": 2900, "desc": "Highest accuracy, slowest", "params": "1550M"},
+    "distil-large": {
+        "size_mb": 1510,
+        "desc": "Distil-Large v3.5 — fast, optimized for short-form/commands",
+        "params": "756M",
+    },
 }
 
 
@@ -1492,6 +1498,13 @@ class SettingsDialog(Gtk.Dialog):
         scrolled.set_min_content_height(350)
 
         controls_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+
+        note = Gtk.Label(
+            label="Mode profiles override prompt, temperature, and context settings during dictation."
+        )
+        note.set_line_wrap(True)
+        note.set_xalign(0)
+        controls_box.pack_start(note, False, False, 0)
 
         group = PreferencesGroup(title="Whisper.cpp Decoding")
 

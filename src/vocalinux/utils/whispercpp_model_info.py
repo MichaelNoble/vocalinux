@@ -46,6 +46,12 @@ WHISPERCPP_MODEL_INFO = {
         "desc": "Highest accuracy, slowest",
         "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin",
     },
+    "distil-large": {
+        "size_mb": 1510,
+        "params": "756M",
+        "desc": "Distil-Large v3.5 — fast, English-only, optimized for short-form/commands",
+        "url": "https://huggingface.co/distil-whisper/distil-large-v3.5-ggml/resolve/main/ggml-model.bin",
+    },
 }
 
 # Available models list
@@ -255,6 +261,8 @@ def get_model_path(model_name: str) -> str:
     if model_name == "large":
         # Large model uses v3 variant
         return os.path.join(models_dir, "ggml-large-v3.bin")
+    elif model_name == "distil-large":
+        return os.path.join(models_dir, "distil-large-v3.5.bin")
     else:
         return os.path.join(models_dir, f"ggml-{model_name}.bin")
 

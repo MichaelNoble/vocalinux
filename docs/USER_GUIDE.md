@@ -153,3 +153,46 @@ vocalinux --debug
 ```
 
 Check the logs for error messages and possible solutions.
+
+
+### Mode profiles and advanced decoding settings
+
+Whisper.cpp applies saved Advanced settings as defaults, then applies the active
+mode profile for each utterance. Profiles override `initial_prompt`,
+`single_segment`, `suppress_blank`, `temperature`, and `no_context`. Saved
+`no_timestamps`, `temperature_inc`, `entropy_thold`, `logprob_thold`, and
+`no_speech_thold` continue to apply in every mode. Switching modes explicitly
+resets managed values, including false values and empty prompts. All mode
+profiles use `no_context=True`: previous recognized text is not fed back into
+the next recording. This avoids accumulating recognition mistakes across
+utterances; editor context used for formatting is separate and unchanged.
+
+Direct mode leaves postprocessed text unchanged. Voice command recognition is
+controlled separately by the existing voice-command setting. Strict mode keeps
+the clean text-processing behavior in this release; it does not enforce a
+command-only grammar. Model, GPU backend, and sampling strategy are unchanged
+when switching modes. Unsupported decoding fields stop that transcription with
+an explanatory log message instead of silently applying part of a profile.
+
+Debug logs show the effective non-content decoding settings. These diagnostic
+entries omit prompt text. Use the same model and recordings when comparing
+profiles; no profile is a guarantee of higher recognition accuracy.
+
+Stage-one command corrections preserve standalone punctuation and operators
+(including `!=` and `::`). In dictation/clean modes, spoken punctuation retains
+word boundaries against editor context. Coding and terminal transformations keep
+their exact command spacing. Unsupported actions (`save`, `find`, `delete last
+word`, and `delete last sentence`, including their aliases) remain ordinary text
+until handlers are implemented; they no longer disappear without an action.
+
+Compatibility note: older native bindings may omit `no_timestamps`. As at model
+startup, this optional setting is omitted from transcription calls with a
+one-time warning; the binding's native timestamp behavior remains active. Mode
+parameters still require support and are never silently dropped.
+
+Whitespace commands (`new line`, `new paragraph`, `tab`, and `space`) preserve
+the requested characters through formatting and insertion, including standalone
+commands. Automatic sentence punctuation attached to a whitespace command
+(e.g. `New line.`) is discarded; explicitly spoken punctuation remains, so
+`new line question mark` inserts a newline followed by `?`. A separator command
+replaces adjacent recognition spaces; use `tab` or `space` for indentation.

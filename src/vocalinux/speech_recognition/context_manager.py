@@ -34,7 +34,7 @@ _FALLBACK_CONTEXT = {
 }
 
 # How long to wait for surrounding text to arrive after a context change
-_SURROUNDING_TEXT_POLL_TIMEOUT = 0.3    # seconds
+_SURROUNDING_TEXT_POLL_TIMEOUT = 0.3  # seconds
 _SURROUNDING_TEXT_POLL_INTERVAL = 0.05  # seconds
 
 """
@@ -46,6 +46,7 @@ _SURROUNDING_TEXT_POLL_INTERVAL = 0.05  # seconds
     fallback dict is returned with context_changed=True so that callers
     fail safely — i.e. they will not prepend a space or assume continuity.
 """
+
 
 def _raw_get_context(timeout: float = 1.0) -> dict:
     """
@@ -96,6 +97,7 @@ def _raw_get_context(timeout: float = 1.0) -> dict:
         logger.warning(f"Could not connect to IBus engine socket: {e}")
         return dict(_FALLBACK_CONTEXT)
 
+
 def _context_looks_stale(context: dict) -> bool:
     text = context["surrounding_text"]
     cursor = context["cursor_pos"]
@@ -112,6 +114,7 @@ def _context_looks_stale(context: dict) -> bool:
         return True
 
     return False
+
 
 def get_context(timeout: float = 1.0) -> dict:
     """
@@ -148,9 +151,8 @@ def get_context(timeout: float = 1.0) -> dict:
     # let the caller handle empty surrounding text gracefully.
 
     should_poll = (
-            (context["context_changed"] and not context["surrounding_text"])
-            or _context_looks_stale(context)
-    )
+        context["context_changed"] and not context["surrounding_text"]
+    ) or _context_looks_stale(context)
 
     if not context["surrounding_text"]:
         logger.debug("Empty context — polling for recovery")

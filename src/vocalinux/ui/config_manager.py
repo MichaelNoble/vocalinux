@@ -127,7 +127,9 @@ class ConfigManager:
         sr_config = user_config.get("speech_recognition", {})
         # Need migration if we have model_size but not the per-engine keys
         return "model_size" in sr_config and (
-            "vosk_model_size" not in sr_config or "whisper_model_size" not in sr_config
+            "vosk_model_size" not in sr_config
+            or "whisper_model_size" not in sr_config
+            or "whisper_cpp_model_size" not in sr_config
         )
 
     def _migrate_config(self, user_config: dict):
@@ -151,6 +153,14 @@ class ConfigManager:
                 current_model if current_engine == "whisper" else "tiny"
             )
             logger.info(f"Migrated whisper_model_size to: {sr_config['whisper_model_size']}")
+
+        if "whisper_cpp_model_size" not in user_sr_config:
+            sr_config["whisper_cpp_model_size"] = (
+                current_model if current_engine == "whisper_cpp" else "tiny"
+            )
+            logger.info(
+                f"Migrated whisper_cpp_model_size to: {sr_config['whisper_cpp_model_size']}"
+            )
 
         self.save_config()
         logger.info("Config migrated to new per-engine model format")
