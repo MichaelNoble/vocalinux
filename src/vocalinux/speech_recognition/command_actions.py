@@ -204,11 +204,23 @@ def process_text_commands(
     cmds = text_commands if text_commands is not None else TEXT_COMMANDS
     punct = punctuation_commands if punctuation_commands is not None else PUNCTUATION_COMMANDS
 
-    for cmd in sorted(cmds.keys(), key=len, reverse=True):
+    # Handle whitespace before generating punctuation, so "new line question
+    # mark" retains its explicit question mark rather than treating it as an
+    # automatic sentence mark on the whitespace command.
+    ordered_commands = sorted(
+        cmds, key=lambda cmd: (not TEXT_COMMANDS.get(cmd, "").isspace(), -len(cmd))
+    )
+    for cmd in ordered_commands:
         replacement = cmds[cmd]
         repl_fn = lambda m, r=replacement: r  # noqa: E731
 
-        if cmd in punct:
+        if cmd in TEXT_COMMANDS and TEXT_COMMANDS[cmd].isspace():
+            # Spoken separators replace adjacent recognition spaces. A literal
+            # sentence mark immediately after the phrase belongs to recognition,
+            # not to the command ("New line." must insert only a newline).
+            pattern = r"(?i)[ \t]*\b" + re.escape(cmd) + r"\b[.,!?]?[ \t]*"
+            text = re.sub(pattern, repl_fn, text)
+        elif cmd in punct:
             # Eat preceding space when there is actual text before the command
             pattern = r"(?i)(?<=\S) *\b" + re.escape(cmd) + r"\b"
             if re.search(pattern, text):

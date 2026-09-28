@@ -93,7 +93,7 @@ class TestCommandProcessor(unittest.TestCase):
         """Test combinations of different command types."""
         test_cases = [
             # Text + Action
-            ("new line then delete that", "\n then", ["delete_last"]),
+            ("new line then delete that", "\nthen", ["delete_last"]),
             # Format + Text
             ("capitalize name period", "Name.", []),
             # Action + Format
@@ -179,7 +179,7 @@ class TestCommandProcessor(unittest.TestCase):
         """Test handling of whitespace in command processing."""
         # Test with extra spaces
         result, _ = self.processor.process_text("new    line   test")
-        self.assertEqual(result, "\n test")
+        self.assertEqual(result, "\ntest")
 
         # Test with leading/trailing spaces
         result, _ = self.processor.process_text("  period  ")

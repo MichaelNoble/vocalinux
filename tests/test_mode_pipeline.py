@@ -77,3 +77,27 @@ def test_commands_disabled_preserves_command_words(context):
     manager._process_audio_buffer([b"audio"])
     assert texts == ["delete that"]
     assert actions == []
+
+
+@pytest.mark.parametrize("mode", ["clean", "strict", "dictation", "coding", "terminal", "direct"])
+@pytest.mark.parametrize(
+    "spoken,expected",
+    [
+        ("new line", "\n"),
+        ("New line.", "\n"),
+        ("New line?", "\n"),
+        ("new paragraph", "\n\n"),
+        ("tab", "\t"),
+        ("space", " "),
+        ("tab tab hello", "\t\thello"),
+        ("hello new line, world", "hello\nworld"),
+        ("hello space space world", "hello  world"),
+        ("hello new line period", "hello\n."),
+    ],
+)
+def test_whitespace_commands_survive_processing(context, mode, spoken, expected):
+    manager, texts, actions = manager_for(spoken)
+    manager.mode_controller.mode = mode
+    manager._process_audio_buffer([b"audio"])
+    assert texts == [expected]
+    assert actions == []

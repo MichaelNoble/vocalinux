@@ -189,3 +189,10 @@ Compatibility note: older native bindings may omit `no_timestamps`. As at model
 startup, this optional setting is omitted from transcription calls with a
 one-time warning; the binding's native timestamp behavior remains active. Mode
 parameters still require support and are never silently dropped.
+
+Whitespace commands (`new line`, `new paragraph`, `tab`, and `space`) preserve
+the requested characters through formatting and insertion, including standalone
+commands. Automatic sentence punctuation attached to a whitespace command
+(e.g. `New line.`) is discarded; explicitly spoken punctuation remains, so
+`new line question mark` inserts a newline followed by `?`. A separator command
+replaces adjacent recognition spaces; use `tab` or `space` for indentation.

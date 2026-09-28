@@ -78,3 +78,53 @@ def test_all_recognized_actions_have_a_handler():
 
 def test_action_only_recognition_punctuation_does_not_insert_text():
     assert CommandProcessor().process_text("Delete that.") == ("", ["delete_last"])
+
+
+@pytest.mark.parametrize(
+    "spoken,expected", [("space space", "  "), ("tab tab", "\t\t"), ("new paragraph.", "\n\n")]
+)
+def test_explicit_whitespace_survives_existing_editor_spaces(spoken, expected):
+    with patch(
+        "vocalinux.speech_recognition.text_post_processor.get_context",
+        return_value={
+            "surrounding_text": "before  after",
+            "cursor_pos": 7,
+            "context_changed": False,
+        },
+    ):
+        text, _ = CommandProcessor().process_text(spoken)
+        assert TextPostProcessor().process(text, mode="dictation", was_transformed=True) == expected
+
+
+def test_literal_marker_like_text_survives_command_processing():
+    assert CommandProcessor().process_text("\ue0000\ue000 new line hello") == (
+        "\ue0000\ue000\nhello",
+        [],
+    )
+
+
+@pytest.mark.parametrize(
+    "spoken,expected",
+    [
+        ("new line question mark", "\n?"),
+        ("new line full stop", "\n."),
+        ("hello space exclamation point world", "hello ! world"),
+    ],
+)
+def test_explicit_punctuation_after_whitespace_command_is_not_discarded(spoken, expected):
+    assert CommandProcessor().process_text(spoken) == (expected, [])
+
+
+@pytest.mark.parametrize("spoken", ["hello comma.", "hello period,"])
+@pytest.mark.parametrize("mode", ["clean", "strict", "coding", "terminal"])
+def test_transformed_punctuation_pairs_still_cleaned(spoken, mode):
+    with patch(
+        "vocalinux.speech_recognition.text_post_processor.get_context",
+        return_value={
+            "surrounding_text": "",
+            "cursor_pos": 0,
+            "context_changed": True,
+        },
+    ):
+        text, _ = CommandProcessor().process_text(spoken)
+        assert TextPostProcessor().process(text, mode=mode, was_transformed=True) == "hello."

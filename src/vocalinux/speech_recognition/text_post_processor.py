@@ -46,6 +46,9 @@ class TextPostProcessor:
     def process(self, text, mode="dictation", was_transformed=False):
         if mode in {"direct", "raw"}:
             return text
+        if was_transformed and text and text.isspace():
+            self.last_text = text
+            return text
 
         logger.info(f"Initial: {text} | mode={mode}")
 
@@ -69,7 +72,10 @@ class TextPostProcessor:
         )
 
         for step_name in self._MODE_PIPELINE.get(mode, self._MODE_PIPELINE["clean"]):
-            text = text.lstrip(" \t")  # not \n
+            if was_transformed and step_name == "_normalize_whitespace":
+                continue  # command processor already cleaned non-command whitespace
+            if not was_transformed:
+                text = text.lstrip(" \t")  # not newlines
             text = getattr(self, step_name)(text)
 
         self.last_text = text
@@ -86,17 +92,19 @@ class TextPostProcessor:
         return text.strip(" \t")  # not newlines
 
     def _cleanup_punctuation(self, text: str) -> str:
-        # Remove space before punctuation
-        text = re.sub(r"\s+([.,!?])", r"\1", text)
+        # Command spacing is intentional; never consume its newlines/tabs.
+        if not self.was_transformed:
+            text = re.sub(r"[ \t]+([.,!?])", r"\1", text)
 
         # Collapse duplicate punctuation
         # text = re.sub(r"([.,!?])\s*\1+", r"\1", text)
 
         # Fix ", ." → "."
-        text = re.sub(r",\s*\.", ".", text)
+        separator = "" if self.was_transformed else r"[ \t]*"
+        text = re.sub("," + separator + r"\.", ".", text)
 
         # Fix ". ," → "."
-        text = re.sub(r"\.\s*,", ".", text)
+        text = re.sub(r"\." + separator + ",", ".", text)
 
         # If chunk starts with punctuation, avoid leading space later
         if text and text[0] in ".,!?":
@@ -250,7 +258,8 @@ class TextPostProcessor:
         if self.preserve_command_spacing:
             return text  # identifier/shell transformations retain exact spacing
 
-        text = text.lstrip(" \t")
+        if not self.was_transformed:
+            text = text.lstrip(" \t")
 
         # --------------------------------
         # Establish effective context
@@ -283,7 +292,7 @@ class TextPostProcessor:
         elif prev_char in ("\n", " "):
             prepend_space = False
 
-        elif text.startswith((" ", "\n")):
+        elif text.startswith((" ", "\n", "\t")):
             prepend_space = False
 
         elif prev_char in ".!?":
@@ -302,7 +311,7 @@ class TextPostProcessor:
 
         if after:
             if not after.startswith((" ", "\n")) and not text.endswith(  # no space ahead
-                (" ", "\n")
+                (" ", "\n", "\t")
             ):  # no space already
                 last_char = text[-1]
 
@@ -337,13 +346,14 @@ class TextPostProcessor:
         # FINAL NORMALIZATION (critical)
         # --------------------------------
         # Collapse multiple spaces
-        text = re.sub(r" {2,}", " ", text)
+        if not self.was_transformed:
+            text = re.sub(r" {2,}", " ", text)
 
         # Respect existing surrounding spaces (prevents accumulation)
-        if after.startswith(" "):
+        if after.startswith(" ") and not self.was_transformed:
             text = text.rstrip(" ")
 
-        if before.endswith(" "):
+        if before.endswith(" ") and not self.was_transformed:
             text = text.lstrip(" ")
 
         logger.debug(

@@ -389,8 +389,8 @@ def main():
         #
         #   text_callback(text: str)
         #       Called on the recognition thread when a transcription segment
-        #       is finalised.  The wrapper below strips whitespace, inserts
-        #       inter-segment spaces, injects the text, and records it so
+        #       is finalised. The wrapper injects the already formatted payload
+        #       unchanged, including whitespace commands, and records it so
         #       "delete that" can undo it.
         #
         #   action_callback(action: str) -> bool
@@ -407,25 +407,16 @@ def main():
             """Bridge between speech engine text events and the text injector.
 
             Called on the recognition thread with each finalised transcription
-            segment.  Strips leading/trailing whitespace (whisper tokenizer
-            sometimes prepends spaces), inserts a single space between
-            consecutive segments, then injects via TextInjector.
+            segment. Formatting is already complete; pass the exact payload,
+            including whitespace commands, through to TextInjector.
 
             Args:
                 text: Raw transcription segment from the speech engine.
             """
-            # text_to_inject = text.strip()
-            if not text.strip():
+            # Whitespace may be an explicit newline, paragraph, tab or space
+            # command. Only an actually empty payload is a no-op.
+            if not text:
                 return
-
-            ## Now Handled in TextPostProcessor.
-            # Add a separating space between consecutive dictation segments,
-            # but never for the very first segment (avoids unwanted leading space
-            # when starting dictation in an empty text field).
-            # if action_handler.last_injected_text and action_handler.last_injected_text.strip():
-            #     text_to_inject = " " + text_to_inject
-            #     logger.debug("Added space separator before new segment")
-            ##
 
             success = text_system.inject_text(text)
             if success:

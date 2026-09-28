@@ -983,7 +983,7 @@ class IBusTextInjector:
         Returns:
             True if injection was successful, False otherwise
         """
-        if not text or not text.strip():
+        if not text:
             logger.debug("Empty text provided, skipping injection")
             return True
 

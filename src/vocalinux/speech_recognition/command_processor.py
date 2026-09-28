@@ -126,11 +126,27 @@ class CommandProcessor:
         # Step 3 — single-word format modifiers (capitalize, uppercase, …)
         text = process_format_modifiers(text)
 
-        # Step 4 — punctuation and symbol replacements
-        text = process_text_commands(text)
+        # Protect whitespace explicitly requested by commands while ordinary
+        # recognition whitespace is normalized. Choose markers absent from the
+        # input so literal user text can never be mistaken for a command token.
+        marker = "\ue000"
+        while marker in text:
+            marker += "\ue000"
+        commands = dict(TEXT_COMMANDS)
+        whitespace_tokens = {}
+        for index, (command, replacement) in enumerate(TEXT_COMMANDS.items()):
+            if replacement.isspace():
+                token = f"{marker}{index}{marker}"
+                commands[command] = token
+                whitespace_tokens[token] = replacement
 
-        # Step 5 — whitespace normalisation
+        # Step 4 — punctuation and symbol replacements
+        text = process_text_commands(text, text_commands=commands)
+
+        # Step 5 — normalize recognition whitespace, then restore commands.
         text = clean_whitespace(text)
+        for token, replacement in whitespace_tokens.items():
+            text = text.replace(token, replacement)
 
         logger.debug("Result: text=%r  actions=%r", text, actions)
         return text, actions

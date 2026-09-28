@@ -278,12 +278,6 @@ class TestTextInjector(unittest.TestCase):
         # No subprocess calls should have been made
         self.mock_subprocess.assert_not_called()
 
-        # Try with just whitespace
-        injector.inject_text("   ")
-
-        # Still no subprocess calls
-        self.mock_subprocess.assert_not_called()
-
     def test_missing_dependencies(self):
         """Test error when no text injection dependencies are available."""
         # No tools available
